@@ -1,4 +1,4 @@
-"""python -m agents open|stop|kill <agent> | skill install|list | memory list|snapshot|rollback"""
+"""python -m agents open|stop|kill <agent> | skill install|list|status | memory list|show|snapshot|rollback"""
 
 import argparse
 import json
@@ -27,8 +27,9 @@ def main() -> None:
     install.add_argument("path")
     install.add_argument("--force", action="store_true", help="install even if the scan finds problems")
     skill.add_parser("list").add_argument("agent", choices=skills.SUPPORTED)
+    skill.add_parser("status").add_argument("agent", choices=skills.SUPPORTED)
     mem = commands.add_parser("memory", help="hermes memory snapshots")
-    mem.add_argument("action", choices=["list", "snapshot", "rollback"])
+    mem.add_argument("action", choices=["list", "show", "snapshot", "rollback"])
     mem.add_argument("agent", choices=["hermes"])
     mem.add_argument("snapshot", nargs="?", help="snapshot id for rollback")
     args = parser.parse_args()
@@ -47,7 +48,16 @@ def main() -> None:
         print(f"token: {opened.chat_token}")
     elif args.command == "skill" and args.action == "install":
         print(json.dumps(skills.install(args.agent, args.path, args.force), indent=2))
+    elif args.command == "skill" and args.action == "status":
+        skills.sync_defaults(args.agent)
+        print(
+            json.dumps(
+                {"installed": skills.installed(args.agent), "quarantined": skills.quarantined()},
+                indent=2,
+            )
+        )
     elif args.command == "skill":
+        skills.sync_defaults(args.agent)
         print("\n".join(skills.installed(args.agent)))
     elif args.command == "memory":
         print(manager.memory(args.agent, args.action, *([args.snapshot] if args.snapshot else [])), end="")

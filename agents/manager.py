@@ -20,6 +20,7 @@ AGENTS_DIR = ROOT / "data" / "agents"
 FOLDER_MOUNTS = ROOT / "data" / "gateway" / "compose.folders.yaml"
 CHAT_USER = "heimdall"
 AGENTS = ("openclaw", "hermes")
+TOOLS = ("files_list", "files_read", "files_write", "gmail_read", "gmail_draft", "gmail_send", "web_fetch")
 # provider -> default model
 PROVIDERS = {"gemini": "gemini-flash-lite-latest", "anthropic": "claude-haiku-4-5"}
 
@@ -52,7 +53,7 @@ def gateway_folder_mounts(permission_sets: list[AgentPermissions]) -> list[dict]
     return list(mounts.values())
 
 
-def write_permissions(agent: str, permissions: AgentPermissions) -> None:
+def write_permissions(agent: str, permissions: AgentPermissions, provider: str = "gemini") -> None:
     """What the gateway reads: this agent's permissions.json, and the folder mounts for all agents."""
     others = [
         AgentPermissions(**json.loads(path.read_text(encoding="utf-8"))["permissions"])
@@ -74,6 +75,7 @@ def write_permissions(agent: str, permissions: AgentPermissions) -> None:
     ]
     # A new run_id each open tells the gateway to start a fresh session for this agent.
     content = {
+        "provider": provider,
         "run_id": secrets.token_hex(8),
         "fake_key": profile(agent).FAKE_KEY,
         "permissions": permissions.model_copy(update={"folders": resolved}).model_dump(),
@@ -90,7 +92,7 @@ def open_agent(
         raise ValueError(f"unknown provider: {provider}")
     config_path = AGENTS_DIR / agent / "config.json"
     _write_json(config_path, module.build_config(permissions, provider, model or PROVIDERS[provider]))
-    write_permissions(agent, permissions)
+    write_permissions(agent, permissions, provider)
     token = secrets.token_urlsafe(24)
     env = {
         f"HEIMDALL_{agent.upper()}_TOKEN": token,
@@ -109,6 +111,11 @@ def open_agent(
 
 def stop_agent(agent: str) -> None:
     profile(agent)
+    if agent == "hermes":
+        try:
+            memory("hermes", "snapshot")
+        except subprocess.CalledProcessError:
+            pass
     compose("stop", agent, f"{agent}-ui")
 
 
@@ -119,7 +126,7 @@ def kill_agent(agent: str) -> None:
 
 
 def memory(agent: str, *args: str) -> str:
-    """Hermes memory snapshots: memory(agent, "list" | "snapshot" | "rollback", [id])."""
+    """Hermes memory snapshots: memory(agent, "list" | "show" | "snapshot" | "rollback", [id])."""
     if agent != "hermes":
         raise ValueError(f"{agent} has no memory")
     return compose("exec", "-T", agent, "heimdall-memory", *args)
