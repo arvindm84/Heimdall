@@ -1,7 +1,7 @@
 """Scene 5 with real containers: OpenClaw replies to an email and the user approves the send.
 
-C's back end runs on the host at port 5000, where the gateway container reaches it
-(host.docker.internal:5000). The agent's tool calls are made with curl from inside
+C's back end runs on the host at port 8765, where the gateway container reaches it
+(host.docker.internal:8765). The agent's tool calls are made with curl from inside
 the OpenClaw container, so the test does not depend on what the model decides.
 """
 
@@ -21,7 +21,7 @@ REAL_TO = "priya.raman@example.com"
 
 @pytest.fixture(scope="module")
 def core():
-    url, _, server = core_backend.start(port=5000)
+    url, _, server = core_backend.start(port=8765)
     yield url, core_backend.Dashboard(url)
     server.shutdown()
 

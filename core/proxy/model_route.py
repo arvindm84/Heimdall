@@ -22,7 +22,7 @@ from starlette.responses import JSONResponse, Response, StreamingResponse
 
 from core.firewall import core_client, permissions, secrets
 from core.firewall.config import GatewaySettings
-from core.firewall.permissions import NoPermissions
+from core.firewall.permissions import AgentRun, NoPermissions
 from core.firewall.session import Sessions
 from core.proxy import mock_model
 from core.proxy.consent import Consent
@@ -56,6 +56,13 @@ def upstream_for(path: str, settings: GatewaySettings) -> tuple[str, dict[str, s
     if path.endswith("messages"):
         return f"https://api.anthropic.com/{path}", {"x-api-key": settings.anthropic_key}
     return None
+
+
+def provider_id(path: str) -> str:
+    """The provider a request goes to, as B's agent manager names it: gemini, anthropic or local."""
+    if path.startswith(LOCAL_PREFIX):
+        return "local"
+    return "gemini" if path.endswith("chat/completions") else "anthropic"
 
 
 def provider_name(path: str) -> str:
@@ -130,8 +137,18 @@ def make_model_route(
         if blocked is not None:
             return blocked
         local = path.startswith(LOCAL_PREFIX)
-        if not local and consent is not None and sessions is not None:
-            await withhold_denied(body, agent, key, path, consent, sessions, settings)
+        try:
+            run = permissions.load(settings.agents_dir, agent, key)
+        except NoPermissions:
+            run = None  # no permissions, no file tools: nothing Confidential can have been served
+        # Only the provider the user chose, or the local model (which keeps data on the machine).
+        chosen = run.provider if run else None
+        if chosen and not local and provider_id(path) != chosen:
+            reason = f"the user chose {chosen} for this agent, not {provider_id(path)}"
+            core_client.emit("model_blocked", agent=agent, path=path, rule_id="provider_not_chosen", reason=reason)
+            return JSONResponse({"error": f"Heimdall blocked this request: {reason}"}, status_code=403)
+        if not local and run is not None and consent is not None and sessions is not None:
+            await withhold_denied(body, agent, run, path, consent, sessions)
         if settings.mock:
             return mock_model.reply(path, body)
         url, headers = upstream
@@ -147,13 +164,9 @@ def make_model_route(
 
 
 async def withhold_denied(
-    body: dict, agent: str, key: str, path: str, consent: Consent, sessions: Sessions, settings: GatewaySettings
+    body: dict, agent: str, run: AgentRun, path: str, consent: Consent, sessions: Sessions
 ) -> None:
     """Consent for Confidential text in this request; denied blocks are replaced in `body`."""
-    try:
-        run = permissions.load(settings.agents_dir, agent, key)
-    except NoPermissions:
-        return  # no permissions, no file tools: nothing Confidential can have been served
     session = sessions.for_run(agent, run.run_id)
     withheld = await consent.check(body, agent, session.id, provider_name(path))
     if withheld:

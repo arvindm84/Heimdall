@@ -1,10 +1,10 @@
-# Firewall → App back end: what the gateway sends to `/raise`
+# Firewall → App back end: what the gateway sends to `/api/raise`
 
-From A (firewall), for C. Tested against `backend/app.py` as of the `firewall` branch (Nov 15), with no changes to the back end: `tests/seams/test_gateway_core.py` runs your Flask app in a thread.
+From A (firewall), for C. Tested against `backend/app.py` from main (Nov 15, port 8765, routes under `/api`), with no changes to the back end: `tests/seams/test_gateway_core.py` runs your Flask app in a thread.
 
 ## Every question
 
-`POST /raise` with JSON. `container_id` is the agent's name (`openclaw` or `hermes`), not a Docker id. `kind` says which pop-up to show. The gateway waits up to 125 s; anything other than `{"decision": "approve"}` counts as a deny.
+`POST /api/raise` with JSON (the gateway calls `http://host.docker.internal:8765`; `CORE_URL` changes it). `container_id` is the agent's name (`openclaw` or `hermes`), not a Docker id. `kind` says which pop-up to show. The gateway waits up to 125 s; anything other than `{"decision": "approve"}` counts as a deny.
 
 | Field | Always | Meaning |
 |---|---|---|
@@ -26,9 +26,9 @@ A consent answer on a model call holds for that file for the rest of the agent's
 
 ## Events
 
-Everything else the gateway decides goes to its stdout as JSON lines (`docker compose logs gateway`), with a `kind` field: `tool_call`, `tool_denied`, `hidden_instruction`, `injection_check`, `model_call`, `model_forwarded`, `model_blocked`, `model_withheld`, `consent`. They hold counts, rule ids, file paths, URLs and masked previews, never the real values behind placeholders or keys. The one exception is `hidden_instruction`, which shows the hidden text found in an email or page (up to 500 characters) as evidence. When you have an endpoint for plain events, `core/firewall/core_client.py` `emit()` is the one place to change.
+Everything else the gateway decides goes to its stdout as JSON lines (`docker compose logs gateway`), with a `kind` field: `tool_call`, `tool_denied`, `hidden_instruction`, `injection_check`, `model_call`, `model_forwarded`, `model_blocked`, `model_withheld`, `consent`. They hold counts, rule ids, file paths, URLs and masked previews, never the real values behind placeholders or keys. The one exception is `hidden_instruction`, which shows the hidden text found in an email or page (up to 500 characters) as evidence. The dashboard needs these for the activity feed, the flow map and scene 3's red flag. The gateway is ready: with `HEIMDALL_EVENTS_URL` set it posts each event as one JSON object (the line above) to that URL, in order, without waiting on the answer. Proposed: `POST /api/event` on your back end, which puts the event on the `/events` stream with a field telling the dashboard it is an event, not a question.
 
 ## Found while testing (please look)
 
-1. **A question is lost when the dashboard reconnects to `/events`.** Each `/events` connection runs a thread that takes the next question off one shared queue. After a page reload, the old connection's thread is still waiting, takes the next question, and fails to send it, so the pop-up never shows and the agent gets a deny after 120 s. A fix: keep unanswered questions (with their details) in `_waiting`, and send all of them to each new `/events` connection.
-2. **`/response` accepts an answer from anything on the machine.** It should check a token that only the dashboard has.
+1. ~~A question is lost when the dashboard reconnects.~~ Fixed on main; the seam test `test_a_reconnected_dashboard_still_gets_the_question` checks it.
+2. **`/api/response` accepts an answer from anything on the machine.** It should check a token that only the dashboard has.

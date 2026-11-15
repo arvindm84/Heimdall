@@ -1,42 +1,31 @@
-"""Run C's real back end (backend/app.py) in a thread, for seam tests that need /raise."""
+"""Run C's real back end (backend/app.py) in a thread, for seam tests that need /api/raise."""
 
-import importlib.util
 import json
 import queue
-import sys
 import threading
-from pathlib import Path
 
 import httpx
 from werkzeug.serving import make_server
 
-BACKEND = Path(__file__).parents[2] / "backend"
+from backend import app as backend
+from backend.services import notification_service
 
 
 def start(port: int = 0):
-    """Start the back end on 127.0.0.1:port (0: any free port) with an empty request queue.
+    """Start the back end on 127.0.0.1:port (0: any free port).
 
     Returns (url, notification_service module, server); call server.shutdown() when done.
     """
-    # Import it the way `python backend/app.py` does: with backend/ on the path. A fresh copy
-    # each time: an earlier back end's /events threads would otherwise share its queue.
-    sys.path.insert(0, str(BACKEND))
-    for name in [name for name in sys.modules if name == "services" or name.startswith("services.")]:
-        del sys.modules[name]
-    spec = importlib.util.spec_from_file_location("heimdall_backend_app", BACKEND / "app.py")
-    backend = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(backend)
-    notifications = sys.modules["services.notification_service"]
     server = make_server("127.0.0.1", port, backend.app, threaded=True)
     threading.Thread(target=server.serve_forever, daemon=True).start()
-    return f"http://127.0.0.1:{server.server_port}", notifications, server
+    return f"http://127.0.0.1:{server.server_port}", notification_service, server
 
 
 class Dashboard:
-    """One /events connection kept open for its whole life, like the real dashboard.
+    """One /api/events connection kept open for its whole life, like the real dashboard.
 
-    Opening a new connection per question would lose questions: the back end's
-    thread for a closed connection still takes the next one off the queue.
+    The stream has two kinds of message: a question (plain `data:`), and
+    `event: resolved` when one was answered or timed out. Only questions are kept.
     """
 
     def __init__(self, url: str):
@@ -44,10 +33,15 @@ class Dashboard:
         threading.Thread(target=self.listen, args=(url,), daemon=True).start()
 
     def listen(self, url: str) -> None:
-        with httpx.stream("GET", f"{url}/events", timeout=None) as stream:
+        event = "message"
+        with httpx.stream("GET", f"{url}/api/events", timeout=None) as stream:
             for line in stream.iter_lines():
-                if line.startswith("data: "):
+                if line.startswith("event: "):
+                    event = line.removeprefix("event: ")
+                elif line.startswith("data: ") and event == "message":
                     self.raised.put(json.loads(line.removeprefix("data: ")))
+                elif not line:
+                    event = "message"  # a blank line ends one SSE message
 
     def next(self, timeout: float = 60) -> dict:
         """The next raised question. Fails the test if none comes in `timeout` seconds."""
@@ -59,4 +53,4 @@ class Dashboard:
 
 def answer(url: str, request_id: str, decision: str) -> int:
     """Click Approve or Deny on the dashboard. Returns the HTTP status."""
-    return httpx.post(f"{url}/response", json={"request_id": request_id, "decision": decision}).status_code
+    return httpx.post(f"{url}/api/response", json={"request_id": request_id, "decision": decision}).status_code

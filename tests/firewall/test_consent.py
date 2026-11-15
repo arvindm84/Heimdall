@@ -273,3 +273,41 @@ def test_markers_from_another_session_count_for_nothing(tmp_path):
     store = ConfidentialStore(tmp_path / "db")
     wrapped = store.mark("other", "taxes/a.txt", "x")
     assert files_in(wrapped, store.served("mine")) == set()
+
+
+# ---------- only the provider the user chose ----------
+
+
+def choose(settings, provider: str) -> None:
+    """Add the user's provider choice to openclaw's permissions.json, as B's manager would."""
+    path = settings.agents_dir / "openclaw" / "permissions.json"
+    stored = json.loads(path.read_text(encoding="utf-8"))
+    path.write_text(json.dumps({**stored, "provider": provider}), encoding="utf-8")
+
+
+@pytest.mark.parametrize(
+    "chosen, path, allowed",
+    [
+        ("gemini", "chat/completions", True),
+        ("gemini", "v1/messages", False),
+        ("anthropic", "chat/completions", False),
+        ("gemini", "local/chat/completions", True),  # the local model keeps data on the machine
+        ("local", "chat/completions", False),
+        ("local", "local/chat/completions", True),
+    ],
+)
+async def test_only_the_chosen_provider_is_reached(world, asked, events, chosen, path, allowed):
+    settings, gateway, seen, sessions = world
+    choose(settings, chosen)
+    body = anthropic_request("hi") if path.endswith("messages") else openai_request("hi")
+    response = await post(gateway, path, body)
+    assert (response.status_code != 403) is allowed
+    assert bool(seen) is allowed
+    if not allowed:
+        [blocked] = [e for e in events if e["kind"] == "model_blocked"]
+        assert blocked["rule_id"] == "provider_not_chosen"
+
+
+async def test_no_provider_in_permissions_keeps_the_old_behaviour(world, asked):
+    settings, gateway, seen, sessions = world
+    assert (await post(gateway, "v1/messages", anthropic_request("hi"))).status_code == 200

@@ -56,7 +56,7 @@ def test_hidden_instruction_event_shows_the_hidden_sentence(opened):
 
 
 @pytest.mark.docker
-@pytest.mark.parametrize("url", ["http://host.docker.internal:5000/raise", "http://169.254.169.254/latest/meta-data/"])
+@pytest.mark.parametrize("url", ["http://host.docker.internal:8765/api/raise", "http://169.254.169.254/latest/meta-data/"])
 def test_web_fetch_cannot_reach_the_host_or_metadata(opened, url):
     result = mcp_call("web_fetch", {"url": url})
     assert result["isError"]

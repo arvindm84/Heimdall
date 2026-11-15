@@ -1,0 +1,82 @@
+@import "tailwindcss";
+
+/*
+  "Checkpoint ledger" theme.
+  Quiet, legible, ink-on-dark-paper. The verdict stamps are the one bold element; keep the rest calm.
+  Use as Tailwind classes: bg-ground, bg-raised, text-paper, text-lichen, border-rule, text-allowed...
+*/
+@theme {
+  --color-ground: #111714; /* deep pine: page background */
+  --color-raised: #19211d; /* panels, nodes, cards */
+  --color-rule: #2b3530; /* dividers and borders */
+  --color-paper: #ebe5d6; /* main text, primary buttons */
+  --color-lichen: #9aa199; /* secondary text */
+
+  /* Stamp inks: each means exactly one thing */
+  --color-allowed: #9cc49f;
+  --color-blocked: #cf5a52;
+  --color-waiting: #d7a548;
+
+  --font-sans: "Atkinson Hyperlegible Next Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", monospace; /* only for literal paths and URLs */
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background: var(--color-ground);
+  color: var(--color-paper);
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Times and counts line up in columns */
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Verdict stamp: double-ruled ink box, slightly askew, like a rubber stamp. */
+.stamp {
+  display: inline-block;
+  border: 3px double currentColor;
+  border-radius: 3px;
+  padding: 0.05rem 0.5rem;
+  font-weight: 700;
+  font-size: 0.8rem;
+  letter-spacing: 0.02em;
+  transform: rotate(-2deg);
+  opacity: 0.92;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-paper);
+  outline-offset: 2px;
+}
+
+/* Flow graph motion: a new node pops in and a verdict stamp lands. */
+@keyframes node-enter {
+  from { opacity: 0; transform: translateY(-10px) scale(0.92); }
+  to { opacity: 1; transform: none; }
+}
+.node-enter {
+  animation: node-enter 450ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+@keyframes stamp-land {
+  from { opacity: 0; transform: scale(1.7) rotate(-8deg); }
+  60% { opacity: 1; }
+  to { opacity: 0.92; transform: scale(1) rotate(-2deg); }
+}
+.stamp-land {
+  animation: stamp-land 260ms cubic-bezier(0.3, 1.4, 0.5, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .node-enter, .stamp-land { animation: none; }
+}

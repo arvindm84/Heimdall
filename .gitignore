@@ -5,3 +5,9 @@ __pycache__/
 .python-version
 plan.md
 project-plan.md
+.claude/skills/eyes/
+.claude/skills/frontend-design/
+docs/
+backend/__init__.py
+backend/test_routes.py
+postman/
