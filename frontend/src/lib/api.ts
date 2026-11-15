@@ -7,7 +7,9 @@ export type ChatLogin = { agent: string; chat_url: string; chat_user: string; ch
 export type LaunchConfig = {
   tools?: string[];
   folders?: { path: string; label: "public" | "private" | "confidential"; write?: boolean }[];
-  memory?: boolean;
+  skills?: string[]; // OpenClaw only
+  memory?: boolean; // Hermes only
+  delegation?: boolean; // Hermes only
   provider?: "gemini" | "anthropic";
   model?: string;
 };
@@ -59,4 +61,7 @@ export const api = {
   launch: (agent: string, config: LaunchConfig) => call<ChatLogin>("/launch", { agent, config }),
   stop: (agent: string) => call<{ status: string }>("/stop", { agent }),
   kill: (agent: string) => call<{ status: string }>("/kill", { agent }),
+  // The user's answer to a firewall question. 404 if it already timed out.
+  respond: (request_id: string, decision: "approve" | "deny") =>
+    call<{ status: string }>("/response", { request_id, decision }),
 };

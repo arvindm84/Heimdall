@@ -16,14 +16,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { FolderOpen, Globe, Mail, Sparkles, type LucideIcon } from "lucide-react";
-import {
-  FLOW_EXTRA_EVENTS,
-  SAMPLE_EVENTS,
-  VERDICT_STYLE,
-  type FirewallEvent,
-  type ResourceId,
-  type Verdict,
-} from "../data/sample";
+import { VERDICT_STYLE, agentName, type FirewallEvent, type ResourceId, type Verdict } from "../data/events";
 import { TOOL_VERB } from "../data/tools";
 
 /*
@@ -35,7 +28,7 @@ import { TOOL_VERB } from "../data/tools";
 
 // ---------- Timing and sizes ----------
 
-const STEP_MS = 2200; // next sample event
+const STEP_MS = 1200; // next queued event (a burst of events plays one by one)
 const HOP_MS = 650; // a dot travelling one edge
 const MOVE_MS = 600; // nodes sliding to a new layout
 const MAX_DESTINATIONS = 8;
@@ -58,15 +51,15 @@ const CATEGORIES: { id: ResourceId; label: string; icon: LucideIcon }[] = [
   { id: "model", label: "AI model", icon: Sparkles },
 ];
 
-// SAMPLE: the base events with extra ones mixed in, so new destinations keep turning up.
-const SEQUENCE: FirewallEvent[] = SAMPLE_EVENTS.flatMap((e, i) => (FLOW_EXTRA_EVENTS[i] ? [e, FLOW_EXTRA_EVENTS[i]] : [e]));
-
 // ---------- Destinations ----------
+
+// Only events with a resource are drawn (see data/events.ts).
+type Drawn = FirewallEvent & { resource: ResourceId };
 
 type Destination = { key: string; label: string; full: string; category: ResourceId; verdict: Verdict; lastUsed: number; order: number };
 
 // Where a request was going, as a short label: a host, a file path, or an inbox.
-function destinationOf(e: FirewallEvent): { key: string; label: string; full: string } {
+function destinationOf(e: Drawn): { key: string; label: string; full: string } {
   let label = e.target;
   if (e.resource === "web") {
     try {
@@ -162,10 +155,12 @@ type GateData = {
   width: number;
   ins: { id: string; pct: number }[];
   outs: { id: string; pct: number }[];
-  current: FirewallEvent | null;
+  current: Drawn | null;
   stampAt: number; // % across the band where the latest request crossed
-  counts: Record<Verdict, number>;
+  counts: Counts;
 };
+// Allowed / blocked of every event received, plus questions waiting on the user.
+type Counts = { allowed: number; blocked: number; waiting: number };
 type CategoryData = { label: string; icon: LucideIcon; active: boolean };
 type DestinationData = { label: string; full: string; verdict: Verdict; active: boolean };
 
@@ -244,7 +239,7 @@ function DestinationNode({ data }: NodeProps<Node<DestinationData>>) {
   const style = {
     allowed: "border-rule",
     blocked: "border-dashed border-blocked/70 text-blocked line-through decoration-blocked/70",
-    waiting: "border-dashed border-waiting/70 text-waiting",
+    flagged: "border-dashed border-waiting/70 text-waiting",
   }[data.verdict];
   return (
     <div className="node-enter" style={{ width: W.destination }}>
@@ -322,17 +317,31 @@ const edgeTypes = { flow: FlowEdge };
 
 // ---------- Graph ----------
 
-function FlowGraph({ onPlayed }: { onPlayed: (e: FirewallEvent) => void }) {
+function FlowGraph({ events, counts, onPlayed }: { events: FirewallEvent[]; counts: Counts; onPlayed: (e: Drawn) => void }) {
   const [destinations, setDestinations] = useState<Destination[]>([]);
-  const [current, setCurrent] = useState<FirewallEvent | null>(null);
-  const [counts, setCounts] = useState<Record<Verdict, number>>({ allowed: 0, blocked: 0, waiting: 0 });
-  const counter = useRef(0); // in a ref so React's dev-mode double mount doesn't restart it
+  const [current, setCurrent] = useState<Drawn | null>(null);
+  // In refs so React's dev-mode double mount doesn't replay events.
+  const queue = useRef<Drawn[]>([]);
+  const lastQueued = useRef(-1); // id of the newest event put in the queue
+  const step = useRef(0); // plays so far: orders destinations and finds the stalest
 
-  // SAMPLE loop: play the next event, adding its destination if it's new and retiring the stalest one.
+  // New events join the queue. On first open, only the latest few, so the page doesn't replay the whole history.
+  useEffect(() => {
+    const drawn = events.filter((e): e is Drawn => e.resource !== null);
+    // A smaller newest id means the back end restarted (ids start again at 1).
+    if (drawn.length && drawn[drawn.length - 1].id < lastQueued.current) lastQueued.current = -1;
+    const fresh = drawn.filter((e) => e.id > lastQueued.current);
+    if (!fresh.length) return;
+    queue.current.push(...(lastQueued.current < 0 ? fresh.slice(-MAX_DESTINATIONS) : fresh));
+    lastQueued.current = fresh[fresh.length - 1].id;
+  }, [events]);
+
+  // Play the next queued event, adding its destination if it's new and retiring the stalest one.
   useEffect(() => {
     const play = () => {
-      const n = counter.current++;
-      const event = { ...SEQUENCE[n % SEQUENCE.length], id: n, time: new Date().toLocaleTimeString("en-GB") };
+      const event = queue.current.shift();
+      if (!event) return;
+      const n = step.current++;
       const { key, label, full } = destinationOf(event);
 
       setDestinations((prev) => {
@@ -346,7 +355,6 @@ function FlowGraph({ onPlayed }: { onPlayed: (e: FirewallEvent) => void }) {
         }
         return next;
       });
-      setCounts((c) => ({ ...c, [event.verdict]: c[event.verdict] + 1 }));
       setCurrent(event);
       onPlayed(event);
     };
@@ -464,21 +472,33 @@ function FlowGraph({ onPlayed }: { onPlayed: (e: FirewallEvent) => void }) {
 
 // ---------- Page ----------
 
-export default function FlowPage() {
-  const [played, setPlayed] = useState<FirewallEvent[]>([]); // newest first
-  const onPlayed = useMemo(() => (e: FirewallEvent) => setPlayed((prev) => [e, ...prev].slice(0, 4)), []);
+type Props = { events: FirewallEvent[]; waitingCount: number };
+
+export default function FlowPage({ events, waitingCount }: Props) {
+  const [played, setPlayed] = useState<Drawn[]>([]); // newest first
+  const onPlayed = useMemo(() => (e: Drawn) => setPlayed((prev) => [e, ...prev].slice(0, 4)), []);
+  // Counted over every event received, not just the ones drawn, so the band never undercounts.
+  const counts: Counts = useMemo(
+    () => ({
+      allowed: events.filter((e) => e.verdict === "allowed").length,
+      blocked: events.filter((e) => e.verdict === "blocked").length,
+      waiting: waitingCount,
+    }),
+    [events, waitingCount],
+  );
 
   return (
     <div>
       <h1 className="text-3xl font-bold">Flow</h1>
       <p className="mt-2 max-w-[62ch] text-lichen">
-        Sample data. Every request an agent makes crosses Heimdall. New places your agents reach appear as they happen;
-        blocked ones are struck through because nothing got there.
+        Every request an agent makes crosses Heimdall. New places your agents reach appear as they happen; blocked ones
+        are struck through because nothing got there.
+        {events.length === 0 && " Nothing yet: start an agent and ask it to do something."}
       </p>
 
       <div className="mt-8 h-[560px] overflow-hidden rounded-md border border-rule">
         <ReactFlowProvider>
-          <FlowGraph onPlayed={onPlayed} />
+          <FlowGraph events={events} counts={counts} onPlayed={onPlayed} />
         </ReactFlowProvider>
       </div>
 
@@ -491,7 +511,7 @@ export default function FlowPage() {
               <span className="tabular text-xs text-lichen">{e.time}</span>
             </div>
             <p className="mt-1 text-lichen">
-              {e.agent === "openclaw" ? "OpenClaw" : "Hermes"} wanted to {TOOL_VERB[e.action] ?? e.action}
+              {agentName(e.agent)} wanted to {TOOL_VERB[e.action] ?? e.action}
             </p>
             <p className="truncate font-mono text-xs" title={e.target}>
               {e.target}

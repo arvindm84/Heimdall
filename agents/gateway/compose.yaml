@@ -20,6 +20,11 @@ services:
       - path: ../../.env
         required: false
     environment:
+      HEIMDALL_EVENTS_URL: http://host.docker.internal:8765/api/event
+      # Real keys saved in the app (backend/services/key_service.py) win over .env.
+      # Empty in the back end's environment: compose takes them from the repo's .env instead.
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       HEIMDALL_FAKE_KEYS: openclaw:sk-fake-openclaw-01,hermes:sk-fake-hermes-01
     volumes:
       # Each agent's permissions.json. User folders are added by the agent manager

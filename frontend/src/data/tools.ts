@@ -4,6 +4,7 @@
 export const TOOL_NAME: Record<string, string> = {
   files_read: "Read files",
   files_list: "List files",
+  files_write: "Write files",
   gmail_read: "Read email",
   gmail_draft: "Draft email",
   gmail_send: "Send email",
@@ -15,6 +16,7 @@ export const TOOL_NAME: Record<string, string> = {
 export const TOOL_VERB: Record<string, string> = {
   files_read: "read",
   files_list: "list the files in",
+  files_write: "write",
   gmail_read: "read the email",
   gmail_draft: "draft an email to",
   gmail_send: "send an email to",

@@ -3,9 +3,10 @@ import Header, { type Page } from "./components/Header";
 import AgentsPage from "./pages/AgentsPage";
 import FlowPage from "./pages/FlowPage";
 import ActivityPage from "./pages/ActivityPage";
+import QuestionCard from "./components/QuestionCard";
 import { AGENT_PROFILES, type Agent } from "./data/agents";
-import { SAMPLE_EVENTS } from "./data/sample";
 import { ApiError, api } from "./lib/api";
+import { useLive } from "./lib/live";
 
 // Turn any thrown error into what an agent row shows.
 const toError = (e: unknown) =>
@@ -81,19 +82,34 @@ export default function App() {
     }
   };
 
+  // Firewall questions and decisions, live from /api/events.
+  const { questions, events, connected } = useLive();
+
   const running = agents.filter((a) => a.status === "running").length;
-  const waiting = SAMPLE_EVENTS.filter((e) => e.verdict === "waiting").length; // SAMPLE
 
   return (
     <div className="flex h-full flex-col">
-      <Header page={page} onNavigate={setPage} waitingCount={waiting} runningCount={running} onStopAll={stopAll} />
+      <Header page={page} onNavigate={setPage} waitingCount={questions.length} runningCount={running} onStopAll={stopAll} />
       <main className="flex-1 overflow-y-auto">
         <div className="mx-auto max-w-6xl px-8 py-10">
           {page === "agents" && <AgentsPage agents={agents} backendError={backendError} onStart={start} onStop={stop} />}
-          {page === "activity" && <ActivityPage />}
-          {page === "flow" && <FlowPage />}
+          {page === "activity" && <ActivityPage events={events} questions={questions} connected={connected} />}
+          {page === "flow" && <FlowPage events={events} waitingCount={questions.length} />}
         </div>
       </main>
+
+      {/* Pop-up for the oldest open question, on every page except Activity (which lists them all).
+          The agent is waiting on the answer; after 2 minutes it counts as a deny. */}
+      {page !== "activity" && questions.length > 0 && (
+        <div className="fixed bottom-6 right-6 z-50 w-[28rem] max-w-[calc(100vw-3rem)]">
+          <QuestionCard key={questions[0].request_id} q={questions[0]} />
+          {questions.length > 1 && (
+            <button onClick={() => setPage("activity")} className="mt-2 w-full text-right text-sm text-waiting hover:underline">
+              {questions.length - 1} more waiting
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }

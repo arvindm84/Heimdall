@@ -2,7 +2,7 @@ import type { ChatLogin, LaunchConfig } from "../lib/api";
 
 // The agents Heimdall can run. Names must match agents/manager.py AGENTS.
 // `config` is what Start sends to /api/launch until there's a permissions screen.
-// The gateway only offers files_read and files_list so far.
+// Tools the gateway offers: files_list, files_read, files_write, gmail_read, gmail_draft, gmail_send, web_fetch.
 
 export type AgentStatus = "stopped" | "starting" | "running" | "stopping";
 

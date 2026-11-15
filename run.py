@@ -23,6 +23,8 @@ URL = f"http://127.0.0.1:{PORT}/"
 
 
 def start_backend() -> None:
+    # Only the app window (which loads / and gets the session cookie) may call /api.
+    app.config["REQUIRE_TOKEN"] = True
     # threaded=True: /api/raise waits up to 2 minutes and /api/events never ends,
     # so each request needs its own thread. No debug and no reloader in the app.
     app.run(host="127.0.0.1", port=PORT, debug=False, threaded=True, use_reloader=False)

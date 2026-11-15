@@ -14,6 +14,7 @@ compose and rewrite the same gateway config file.
 from pathlib import Path
 
 from agents import manager
+from backend.services import key_service
 from core.contracts.agents import AgentPermissions
 
 # Agents we've launched: name -> what /launch returned (chat address and login).
@@ -26,7 +27,7 @@ def launch_agent(agent: str, config: dict) -> dict:
 
     config:
         folders     [{"path": "/abs/path", "label": "public" | "private" | "confidential", "write": false}]
-        tools       ["files_read", "files_list"]
+        tools       any of files_list, files_read, files_write, gmail_read, gmail_draft, gmail_send, web_fetch
         skills      names of installed skills, OpenClaw only
         memory      bool, Hermes only
         delegation  bool, Hermes only
@@ -50,6 +51,9 @@ def launch_agent(agent: str, config: dict) -> dict:
             raise ValueError(f"folder path must be absolute: {folder.path}")
         if not path.is_dir():
             raise ValueError(f"folder does not exist: {folder.path}")
+
+    # Keys saved in the app go to the gateway (only) when compose starts it.
+    key_service.put_in_environment()
 
     # Slow: waits until the agent's chat answers (minutes on the first build).
     opened = manager.open_agent(agent, permissions, provider, model)
