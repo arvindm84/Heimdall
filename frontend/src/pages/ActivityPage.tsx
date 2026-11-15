@@ -9,7 +9,7 @@ const FILTERS: { id: "all" | Verdict; label: string }[] = [
   { id: "allowed", label: "Allowed" },
   { id: "blocked", label: "Blocked" },
   { id: "flagged", label: "Flagged" },
-  { id: "removed", label: "Removed" },
+  { id: "altered", label: "Altered" },
 ];
 
 type Props = { events: FirewallEvent[]; questions: Question[]; connected: boolean };
