@@ -4,7 +4,7 @@
   "memory": { "memory_enabled": false, "user_profile_enabled": false },
   "mcp_servers": {
     "heimdall": {
-      "url": "http://gateway:8000/mcp",
+      "url": "http://gateway:8080/mcp",
       "timeout": 130,
       "headers": { "Authorization": "Bearer sk-fake-hermes-01" },
       "tools": { "include": [] }

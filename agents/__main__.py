@@ -4,7 +4,7 @@ import argparse
 import json
 
 from agents import manager, skills
-from agents.permissions import AgentPermissions, FolderAccess
+from core.contracts.agents import AgentPermissions, FolderAccess
 
 
 def main() -> None:

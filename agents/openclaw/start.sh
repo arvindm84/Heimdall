@@ -1,6 +1,5 @@
 #!/bin/sh
 set -e
-until [ -f /certs/mitmproxy-ca-cert.pem ]; do sleep 1; done
 mkdir -p ~/.openclaw/workspace
 cp /opt/heimdall/workspace/* ~/.openclaw/workspace/
 # Only the skills Heimdall staged for this launch (scanned, and allowed in permissions).

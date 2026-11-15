@@ -54,8 +54,9 @@ def install(agent: str, source: str | Path, force: bool = False) -> dict:
     target = (QUARANTINE if status == "quarantined" else SKILLS_DIR / agent) / name
     shutil.rmtree(target, ignore_errors=True)
     shutil.copytree(source, target)
-    if status == "installed":
-        shutil.rmtree(QUARANTINE / name, ignore_errors=True)
+    # A skill is in one place only: installing clears the quarantine, quarantining removes the install.
+    other = QUARANTINE if status == "installed" else SKILLS_DIR / agent
+    shutil.rmtree(other / name, ignore_errors=True)
     return {"name": name, "status": status, "findings": findings}
 
 
@@ -69,7 +70,7 @@ def stage(agent: str, names: list[str]) -> Path:
     missing = [name for name in names if name not in installed(agent)]
     if missing:
         raise ValueError(f"skills not installed (or quarantined): {', '.join(missing)}")
-    staged = SKILLS_DIR.parent / "agents" / f"{agent}-skills"
+    staged = SKILLS_DIR.parent / "agents" / agent / "skills"
     shutil.rmtree(staged, ignore_errors=True)
     staged.mkdir(parents=True)
     for name in names:

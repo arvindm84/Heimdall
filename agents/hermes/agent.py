@@ -3,7 +3,7 @@
 import json
 from pathlib import Path
 
-from agents.permissions import AgentPermissions
+from core.contracts.agents import AgentPermissions
 
 PORT = 7682
 FAKE_KEY = "sk-fake-hermes-01"
