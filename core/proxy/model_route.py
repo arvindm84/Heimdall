@@ -60,7 +60,7 @@ def sign_tool_calls(body: dict) -> dict:
     """Gemini rejects a replayed tool call without its thought signature, and OpenClaw drops it.
 
     Google documents this placeholder value for clients that cannot keep the real one.
-    Same fix as B's stand-in gateway.
+    Same fix B's earlier stand-in gateway used.
     """
     for message in body.get("messages") or []:
         for call in (message.get("tool_calls") or []) if isinstance(message, dict) else []:

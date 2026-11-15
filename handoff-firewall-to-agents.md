@@ -1,48 +1,30 @@
-# Firewall → Agents: status after B's restructure
+# Firewall → Agents: status
 
-From A (firewall). Checked against B's `agents` branch at `a410372`. These files are yours (`agents/`, `compose.yaml`), so I haven't changed them.
+From A (firewall). Nothing is waiting on B right now.
 
-## Done and verified
+## Done
 
-| Item | Where | How I checked |
+| Item | Who | Where |
 |---|---|---|
-| Fake key sent on MCP calls | `agents/openclaw/config.json`, `agents/hermes/config.json` (`headers.Authorization`) | Gateway logs name both agents on `tool_call`; no `tool_denied` lines |
-| `permissions.json` with a fresh `run_id`, mounted at `/config/agents` | `agents/manager.py` `write_permissions`, `agents/gateway/compose.yaml` | `agents/test_manager.py` passes |
-| User folders mounted into the gateway only, at `/data/folders/<name>` | `agents/manager.py` `gateway_folder_mounts` | Same test; agent composes mount no user folders |
-| `label` on `FolderAccess` | `core/contracts/agents.py` | The gateway will read it in Step 1 |
+| Fake key sent on MCP calls | B | `agents/openclaw/config.json`, `agents/hermes/config.json` |
+| `permissions.json` with a fresh `run_id`, mounted at `/config/agents` | B | `agents/manager.py`, `agents/gateway/compose.yaml` |
+| User folders mounted into the gateway only | B | `agents/manager.py` `gateway_folder_mounts` |
+| `label` on `FolderAccess` | B | `core/contracts/agents.py` |
+| Switch to the real gateway | A, with the user's OK | `agents/gateway/compose.yaml` now builds `images/gateway/Dockerfile`; the stand-in `agents/gateway/server.py` and `Dockerfile` were removed |
 
-## One change left: switch to the real gateway (needed now)
+**Tested** (Nov 14): `uv run pytest` passed all 53 tests. That covers your `agents/` tests, Docker included, for both OpenClaw and Hermes with a real `GEMINI_API_KEY`, plus the firewall's tests. The gateway logs name both agents, and the real key does not appear in them.
 
-The real gateway now serves Gemini the same way your stand-in does, so it can replace it. In `agents/gateway/compose.yaml`, swap the `build` line for the one in your comment:
+What changed for you with the real gateway:
+- Same URLs, port and log lines as your stand-in.
+- `HEIMDALL_PROVIDER=mock` in `.env` gives a scripted model with no key, for offline runs.
+- Tool results are sent once, without the SDK's extra JSON copy.
 
-```yaml
-  gateway:
-    build: { context: ../.., dockerfile: images/gateway/Dockerfile }
-```
+## Coming in firewall Step 1 (heads-up)
 
-Everything else in that file stays as it is (`env_file`, `HEIMDALL_FAKE_KEYS`, the `/config/agents` volume).
+- `files_read` and friends will read real files from the folders you mount, instead of returning canned text. A call outside the agent's permissions is denied, but it still shows as a `tool_call` event (with `"decision": "deny"`). So `check_sealed_and_routed`, which looks for any `files_read` call, keeps working.
+- The gateway needs to know which mount each folder in `permissions.json` is. Step 1 changes `write_permissions` to store the resolved folder path, which is what the mount name comes from. The firewall side will make that change and run your tests.
 
-**Tested** (Nov 14, branch `firewall-gemini`): with exactly that one line changed, the whole suite passed, 53 tests. That covers all of your `agents/` tests, Docker included, for both OpenClaw and Hermes with a real `GEMINI_API_KEY`, plus the firewall's tests. The real Gemini key does not appear in the gateway logs.
-
-What the real gateway does that your stand-in did:
-- Same URLs (`/mcp`, `/model/*`, port 8080) and the same log lines (`model_call`, `model_forwarded`, `model_blocked`, `model_error`, `tool_call`).
-- `chat/completions` goes to Gemini (with the thought-signature fix), and `messages` goes to Anthropic.
-- 401 without a known fake key. MCP tool calls without a known key are refused.
-
-What it adds:
-- `HEIMDALL_PROVIDER=mock` in `.env` gives a scripted model in both API styles: an offline run that needs no key.
-- Tool results are sent once. Without this, the SDK also sent a second, JSON copy that agents showed to the model.
-
-After the switch, `agents/gateway/server.py` and `agents/gateway/Dockerfile` can be deleted.
-
-## Later (no action yet)
+## Later
 
 - Firewall Step 4 (Gmail): mount `data/credentials.json` and `data/token.json` read-only into the gateway.
-- Scene 4 (fake key stolen), with D: agents have no internet, so a skill's `curl attacker.example` just fails and nothing shows on the dashboard. The firewall will catch the fake key when it leaves through a gateway tool or a model request. If the demo also needs a visible "blocked" moment for raw network calls, we could add a small logger on `gateway:8081` that refuses every connection and logs the host. That would need `HTTPS_PROXY=http://gateway:8081` in the agent images. Let's decide together.
-
-## How to check after the switch
-
-```
-uv run pytest -m "not docker"   # fast, no key needed
-uv run pytest                   # full run; needs GEMINI_API_KEY in .env, about 5 minutes
-```
+- Scene 4 (fake key stolen), with D: agents have no internet, so a raw `curl` from a skill fails with no event. Decide whether the demo needs an egress logger on `gateway:8081`.

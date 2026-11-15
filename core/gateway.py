@@ -1,6 +1,6 @@
 """Heimdall gateway: MCP tools at /mcp and the model proxy at /model, one process on port 8080.
 
-It replaces B's stand-in (agents/gateway/server.py) with the same URLs and log
+It replaced B's earlier stand-in gateway and keeps its URLs and log
 lines, so agent configs don't change. Tools still return canned text; Step 1 adds
 real files behind the policy guard.
 

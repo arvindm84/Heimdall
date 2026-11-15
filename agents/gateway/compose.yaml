@@ -7,9 +7,9 @@ networks:
 
 services:
   gateway:
-    # Stand-in with the same port and paths as A's gateway. To switch to A's:
-    #   build: { context: ../.., dockerfile: images/gateway/Dockerfile }
-    build: .
+    # A's gateway (core/gateway.py): MCP tools at /mcp and the model proxy at /model on 8080.
+    # Built from the repo root because the image needs core/ and uv.lock.
+    build: { context: ../.., dockerfile: images/gateway/Dockerfile }
     networks: [agents-net, outside]
     env_file:
       - path: ../../.env
