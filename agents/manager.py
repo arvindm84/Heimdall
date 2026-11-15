@@ -100,15 +100,19 @@ def open_agent(
         raise ValueError(f"unknown provider: {provider}")
     model = model or PROVIDERS[provider]
     config_path = AGENTS_DIR / agent / "config.json"
-    _write_json(config_path, module.build_config(permissions, provider, model))
+    config = module.build_config(permissions, provider, model)
+    # Everything that can refuse the launch runs before anything is written: a refused
+    # launch must not change the permissions of an agent that is already running.
+    staged = skills.stage(agent, permissions.skills) if agent == "openclaw" else None
+    _write_json(config_path, config)
     write_permissions(agent, permissions, provider, model)
     token = secrets.token_urlsafe(24)
     env = {
         f"HEIMDALL_{agent.upper()}_TOKEN": token,
         f"HEIMDALL_{agent.upper()}_CONFIG": str(config_path),
     }
-    if agent == "openclaw":
-        env["HEIMDALL_OPENCLAW_SKILLS"] = str(skills.stage(agent, permissions.skills))
+    if staged is not None:
+        env["HEIMDALL_OPENCLAW_SKILLS"] = str(staged)
     compose("up", "-d", "--build", "gateway", env=env)
     compose("up", "-d", "--build", "--no-deps", "--force-recreate", agent, f"{agent}-ui", env=env)
     opened = OpenedAgent(

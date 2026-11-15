@@ -94,3 +94,20 @@ def test_malicious_demo_skill_is_quarantined_and_clean_skill_installs(tmp_path, 
     with pytest.raises(ValueError):
         skills.stage("openclaw", ["weather-helper"])
 
+
+def test_a_refused_launch_leaves_the_running_agents_permissions_alone(tmp_path, monkeypatch):
+    monkeypatch.setattr(manager, "AGENTS_DIR", tmp_path / "agents")
+    monkeypatch.setattr(manager, "FOLDER_MOUNTS", tmp_path / "gateway" / "compose.folders.yaml")
+    monkeypatch.setattr(skills, "SKILLS_DIR", tmp_path / "skills")
+    monkeypatch.setattr(skills, "QUARANTINE", tmp_path / "skills" / "quarantine")
+    monkeypatch.setattr(manager, "compose", lambda *args, **kwargs: pytest.fail("docker compose was run"))
+    manager.write_permissions("openclaw", AgentPermissions(tools=["files_read"]))
+    stored = tmp_path / "agents" / "openclaw" / "permissions.json"
+    before = stored.read_text(encoding="utf-8")
+
+    # weather-helper is quarantined by the scan, so it can't be given to the agent.
+    with pytest.raises(ValueError, match="not installed"):
+        manager.open_agent("openclaw", AgentPermissions(skills=["weather-helper"]))
+
+    assert stored.read_text(encoding="utf-8") == before
+    assert not (tmp_path / "agents" / "openclaw" / "config.json").exists()
