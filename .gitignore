@@ -2,3 +2,5 @@ plan.md
 .python-version
 uv.lock
 pyproject.toml
+project-plan.md
+backend/services/__pycache__/
