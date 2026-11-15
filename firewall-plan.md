@@ -8,11 +8,16 @@ The main lesson from the research: **detectors alone do not hold.** "The Attacke
 
 ## What I found that changes the plan of record
 
-1. **The repo does not match `project-plan.md` yet.** There is no `core/`, no `core/contracts/`, no `pyproject.toml`. The back end is Flask in `backend/`, and the firewall-to-core seam today is `POST /raise` (`backend/app.py:57`, `backend/services/notification_service.py`), which blocks up to 120 s and returns `approve` or `deny`. There is no endpoint for plain events, and no "always for this folder" answer. The firewall will talk to the core only through one small adapter (`core_client.py`), so it works against `/raise` now and a WebSocket later.
-2. **Tool names cannot contain dots.** The Claude API requires tool names to match `^[a-zA-Z0-9_-]{1,128}$` (checked in the current docs). MCP allows dots, but an agent that passes `files.read` to Claude gets a 400. Use `files_read`, `gmail_send`, and so on.
-3. **The MCP Python SDK is mid-rename.** v1 uses `FastMCP`; the newer SDK uses `MCPServer` and moves host/port onto `run()`. Pin one version in the first commit and read its README before writing the server.
+1. **The back end is Flask, not the WebSocket core.** C's back end is in `backend/` on `main` (not on this branch). The firewall-to-core seam today is `POST /raise` (`backend/app.py`, `backend/services/notification_service.py`), which blocks up to 120 s and returns `{"decision": "approve" | "deny"}`. There is no endpoint for plain events, and no "always for this folder" answer. The firewall talks to the core only through one small adapter (`core_client.py`), so it works against `/raise` now and a WebSocket later. Timeouts line up: back end 120 s < our client 125 s < OpenClaw's MCP `requestTimeoutMs` 130 s.
+2. **Tool names cannot contain dots.** The Claude API requires tool names to match `^[a-zA-Z0-9_-]{1,128}$`. Use `files_read`, `gmail_send`, and so on. OpenClaw adds its own prefix, so the model sees `heimdall__files_read`; the gateway registers the bare name.
+3. **The agents merge settled how agents reach us** (`images/openclaw/openclaw.json`, `compose.yaml`, `images/fake-gateway/server.py`):
+   - Model calls use a **base URL**, `http://gateway:8080/model`, with the fake key in `x-api-key`. They are not HTTPS through a forward proxy. So the model proxy is a reverse-proxy route inside the gateway, not mitmproxy: no CA certificate, no `HTTPS_PROXY`, no second process.
+   - Agents sit on `agents-net`, which is `internal: true`. They can reach the gateway and nothing else. Blocking egress to other hosts is the network's job; the agent cannot choose which host its model call goes to, because the gateway picks the upstream from the agent's configured provider.
+   - One FastMCP (MCP SDK v1) process serves both `/mcp` and `/model/*` on port 8080, with `stateless_http=True`. There is no MCP session, so agent identity must come from a header on each call.
+   - OpenClaw's MCP config sends no headers yet. Asking B to add `Authorization: Bearer <fake key>`; until then, calls without it are denied from Step 1 on.
+   - Permissions are a contract already: `core/contracts/agents.py` (`AgentPermissions`, `FolderAccess`). The firewall imports them. The folder label is not in the contract yet (issue to C).
 4. **The gateway may not be able to reach the back end.** `backend/app.py` binds 127.0.0.1. A container reaching it through `host.docker.internal` must be tested on Windows in the first hour. If it fails, the core dials the gateway instead (as the plan of record describes).
-5. **Scene 4 is ambiguous.** Section 6 says a fake key seen anywhere else is blocked. The demo script says the attacker's screen receives the fake key. Default here is block and flag; a demo-only allowlisted attacker host can let it through. Decide at the next standup with B and D.
+5. **Scene 4 changes meaning.** Agents have no internet, so a skill's `curl attacker.example` just fails, with no event. The fake key can only leave through the gateway: `web_fetch`, `gmail_send` or `files_write` arguments, or a model request body. The tripwire lives there. If the demo needs a visible "blocked" moment for raw egress, a small egress logger on `gateway:8081` (refuses every `CONNECT`, logs the host, no TLS) could be pointed to by `HTTPS_PROXY`. Decide with B and D.
 
 ## Research basis for each design choice
 
@@ -35,7 +40,8 @@ The main lesson from the research: **detectors alone do not hold.** "The Attacke
 ### The pipeline (one function, every tool call goes through it)
 
 ```
-identify agent (bearer token = its fake key)
+identify agent (bearer token = its fake key; missing or unknown = deny)
+ -> tool in the agent's AgentPermissions.tools?  else deny
  -> policy.decide(tool, args, session)      allow | ask(approval|consent) | deny
  -> if ask: core_client.ask(...)            waits; timeout = deny
  -> run the tool
@@ -47,7 +53,9 @@ identify agent (bearer token = its fake key)
  -> core_client.emit(event)                 every decision, with the rule that fired
 ```
 
-Session = one agent container's lifetime. State is in memory plus SQLite for the vault.
+Session = one agent run (a new `run_id` from the agent manager starts a new session). State is in memory plus SQLite for the vault. Everything runs in one asyncio loop, so tools and `core_client.ask` are `async`: a tool waiting for approval does not block other calls.
+
+Events are JSON lines on stdout with a `kind` field, the same format as B's fake gateway. B's runtime test reads `{"kind": "model_call", "api_key", "tools_offered"}` from the gateway logs, so that event stays.
 
 ### Policy rules (first version)
 
@@ -59,20 +67,22 @@ Session = one agent container's lifetime. State is in memory plus SQLite for the
 | `gmail_draft` | Allow. Placeholders stay as placeholders |
 | `gmail_send` | Always ask. The pop-up shows the final recipient and body after placeholders are filled in. Consent as well if the session label is Confidential |
 | `web_fetch` | GET only. Never fill in placeholders. Deny if the URL holds a key or a placeholder. Ask if the session is untrusted or above Public. Marks the session untrusted |
-| Model call | Host must be the chosen provider or the local model. Rules below |
+| Model call | Sent to the agent's configured provider only. Rules below |
 
 Placeholders are filled in only at `gmail_send`, only after approval, and only from this session's vault. This matters: an injected "send `{{SSN_1}}` to x@evil.com" would otherwise make the firewall leak the real value itself. The approval pop-up showing the real recipient and text is the control.
 
-### Model proxy (mitmproxy add-on)
+### Model proxy (route `/model/{path}` in the gateway)
 
-1. Host not on the allowlist: return 403, emit `blocked_egress`.
-2. Fake key anywhere except the auth header to the allowed provider: block, emit `key_theft_attempt`.
-3. Scan the body: exact match against the real keys the gateway holds, provider key formats, `.env`-shaped blocks. Block on a hit.
-4. Confidential content going to a cloud provider: find the tool-result blocks whose text the gateway itself returned from Confidential folders (exact match on normalized text; fingerprints later). Ask for consent. On deny, replace those blocks with a short "withheld" note and forward the rest. Local model: skip this step.
-5. Swap the fake key for the real one in `x-api-key` or `Authorization`, forward.
-6. Set `flow.response.stream = True` so chat replies still stream.
+Agents point their provider base URL at `http://gateway:8080/model`. For each request:
 
-Use an `async def request` hook so a consent wait does not freeze other traffic. Confirm this on the pinned mitmproxy version during the hour-1 check.
+1. Identify the agent by the fake key in `x-api-key` or `Authorization`. Missing or unknown: 401, emit `model_blocked`. Emit `model_call` (fake key, model, tools offered).
+2. Only the messages path is forwarded (`v1/messages`; OpenAI `chat/completions` when Hermes arrives). Other paths get a harmless stub (`{"data": []}`), as the fake gateway does.
+3. Fake key anywhere except the auth header: block, emit `key_theft_attempt`.
+4. Scan the body: exact match against the real keys the gateway holds, provider key formats, `.env`-shaped blocks. Block on a hit.
+5. Confidential content going to a cloud provider: find the tool-result blocks whose text the gateway itself returned from Confidential folders (markers, then exact match on normalized text; fingerprints later). Ask for consent. On deny, replace those blocks with a short "withheld" note and forward the rest. Local model: skip this step.
+6. Pick the upstream from the agent's provider (`anthropic`, `openrouter`, `ollama`, or `mock` for tests), set the real key and the chosen model, and relay the response as a stream so chat replies still stream.
+
+The handler is `async`, so a consent wait does not freeze other traffic. `mock` returns a scripted reply with no network, for tests and for B. OpenRouter is only for made-up data (CLAUDE.md).
 
 ### Sanitizer and injection signal (scene 3 must work with no network)
 
@@ -87,6 +97,7 @@ Truth rule: events carry the rule id, the removed text and counts. No risk score
 
 | Path | What it holds |
 |---|---|
+| `core/firewall/config.py` | Loads `/config/gateway.json` (folder labels, agents' fake keys and providers) and each agent's `AgentPermissions` (imported from `core/contracts/agents.py`) |
 | `core/firewall/labels.py` | Label order, join, folder label lookup |
 | `core/firewall/session.py` | Per-agent state: labels, what Confidential text was served, vault handle |
 | `core/firewall/policy.py` | Rule table and `decide()` |
@@ -96,9 +107,9 @@ Truth rule: events carry the rule id, the removed text and counts. No risk score
 | `core/firewall/secrets.py` | Key formats, real-key match, fake-key tripwire, `.env` shape |
 | `core/firewall/core_client.py` | `ask()` and `emit()`; today posts to `/raise` |
 | `core/firewall/tools/files.py`, `gmail.py`, `web.py` | The tools. `files` resolves real paths and rejects anything outside the mounted folder |
-| `core/proxy/addon.py`, `model_request.py` | mitmproxy add-on; parsing and editing Anthropic and OpenAI request bodies |
-| `core/gateway.py` | Starts the MCP server and registers tools |
-| `images/gateway/Dockerfile` | Gateway image; its own `requirements.txt` until a shared `pyproject.toml` exists |
+| `core/proxy/model_route.py`, `model_request.py` | The `/model/{path}` route and upstream relay; parsing and editing Anthropic and OpenAI request bodies |
+| `core/gateway.py` | Starts the MCP server on port 8080, registers tools and the model route |
+| `images/gateway/Dockerfile` | Gateway image, built from the repo root with the `gateway` dependency group in `pyproject.toml` |
 | `tests/firewall/`, `tests/seams/` | Unit tests and the two seam tests A co-owns |
 
 ## Build order (tests first at every step)
@@ -107,10 +118,10 @@ Each step ends with a commit and something visible in the event stream. Steps 1 
 
 | Step | Build | Done when | Scene |
 |---|---|---|---|
-| 0, about 45 min | Hour-1 checks: mitmproxy in front of one Claude call with our certificate; Presidio timing on a sample email (target under 300 ms); gateway container reaching `/raise`. Then the skeleton: MCP server with `files_read` returning canned text and one emitted event | Echo agent's read shows up on the back end | Skeleton |
+| 0, about 45 min | Hour-1 checks: MCP SDK pin and header access; Presidio timing on a sample email (target under 300 ms); gateway container reaching `/raise`; OpenClaw MCP headers. Then the skeleton: a drop-in for B's fake gateway (MCP `files_read` with canned text and one event, `/model` route with the mock provider) | OpenClaw's read and model call show up in the gateway's event lines; B's runtime tests pass against it | Skeleton |
 | 1, about 1.5 h | Labels, session state, policy table, guard wrapper, real `files_list/read/write` | Reading outside permissions is denied; path traversal test fails closed | |
 | 2, about 1.5 h | Vault and recognizers | Same value gives the same placeholder; round trip restores it; under 300 ms | 3, 5 |
-| 3, about 1.5 h | Model proxy: allowlist, key swap, fake-key tripwire, secret scan | Mock provider receives the real key; upload of `.env` to another host is blocked and flagged | 4 |
+| 3, about 1.5 h | Model proxy: provider mapping, key swap, fake-key tripwire, secret scan | Mock upstream receives the real key; a model request or tool call carrying `.env` text or the fake key is blocked and flagged | 4 |
 | 4, about 1.5 h | Sanitizer, hidden-instruction flag, `gmail_read`, `web_fetch`, then the Haiku check | Attack email is flagged with the hidden text shown; summary contains `{{EMAIL_2}}` | 3 |
 | 5, about 1 h | `gmail_draft`, `gmail_send` with approval and placeholder fill-in | Approve sends once with the real address; deny and timeout send nothing | 5 |
 | 6, about 1 h | Consent on model calls, strip on deny, local-model bypass | Deny forwards the request without the file text; local model gets no prompt | 6 |
@@ -120,14 +131,15 @@ Test fixtures are made-up emails, files and keys only. For injection tests, writ
 
 ## Issues to open for other owners
 
-- **C:** an endpoint for plain events; consent answers `allow_once / always / deny`; a `kind` field on raised requests; how the gateway gets folder labels, per-agent permissions and the real keys; contract models for all of this.
-- **B:** tool names with underscores; each container sends its fake key as a bearer token on MCP calls; `HTTPS_PROXY` and our certificate in every image; folders mounted read-only into the gateway, not into agents.
-- **B and D:** scene 4, block or let the fake key through to the demo attacker host.
+- **C:** an endpoint for plain events; consent answers `allow_once / always / deny`; a `kind` field on raised requests; a `label` on `FolderAccess`; the back end reachable from the gateway container; `/response` checks a token.
+- **B:** switch the `gateway` service in `compose.yaml` to `images/gateway` (build context `.`); OpenClaw's MCP server sends `Authorization: Bearer ${HEIMDALL_FAKE_KEY}`; the agent manager writes `data/agents/<agent>/permissions.json` (`AgentPermissions` plus a fresh `run_id`) and mounts it read-only into the gateway; user folders mounted read-only into the gateway, never into agents.
+- **B and D:** scene 4 now that agents have no internet: the tripwire is in the gateway's tools and model route; optional egress logger for a visible "blocked" moment.
+- **C and D:** `project-plan.md` still describes mitmproxy with a CA certificate and a WebSocket seam; both changed.
 
 ## Verification
 
-1. `pytest tests/firewall` for each module, with the attack fixtures.
-2. `tests/seams/test_agent_gateway.py`: a test container calls `files_read`, gets placeholders; its model call reaches a mock provider with the real key.
+1. `uv run pytest tests/firewall` for each module, with the attack fixtures.
+2. `uv run pytest -m docker tests/runtime` (B's tests) against the real gateway, and `tests/seams/test_agent_gateway.py`: OpenClaw calls `files_read`, gets placeholders; its model call reaches a mock upstream with the real key.
 3. `tests/seams/test_gateway_core.py`: the firewall raises an approval, the test answers through `/response`, the tool call finishes; no answer means deny.
 4. By hand on the demo laptop: run scenes 3 to 6 from the command line and check each event in the `/events` stream.
 5. `python scripts/smoke.py` once D has it, before each merge.
