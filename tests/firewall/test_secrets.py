@@ -3,6 +3,8 @@
 Every key here is made up and only shaped like the real thing.
 """
 
+import base64
+
 import pytest
 
 from core.firewall import secrets
@@ -80,3 +82,31 @@ def test_strings_in_a_json_body_are_scanned_as_decoded_text():
     # In raw JSON a pasted .env is one line with "\n" escapes; it must still count as lines.
     body = {"messages": [{"role": "user", "content": "A=1\nB=2\nC=3"}], "model": "m"}
     assert [finding.kind for finding in secrets.scan_json(body, [], [])] == ["env_file"]
+
+
+FAKE = "sk-fake-openclaw-01"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "c2stZmFrZS1vcGVuY2xhdy0wMQ==",  # base64
+        base64.b64encode(f"x{FAKE} and more".encode()).decode(),  # base64, inside a longer blob
+        base64.b64encode(f"key={FAKE}\n".encode()).decode(),
+        base64.urlsafe_b64encode(f"??>{FAKE}".encode()).decode(),
+        FAKE.encode().hex(),
+        FAKE.encode().hex().upper(),
+        FAKE[::-1],
+        "sk-fake- openclaw-01",
+        "sk-fake-\nopenclaw-01",
+        "s k - f a k e - o p e n c l a w - 0 1",
+    ],
+)
+def test_a_disguised_fake_key_is_still_a_tripwire(text):
+    assert kinds(text) == ["fake_key"]
+
+
+def test_a_disguised_real_key_is_found():
+    encoded = base64.b64encode(REAL_KEYS[0].encode()).decode()
+    assert kinds(f"blob {encoded}") == ["real_key"]
+    assert "real_key" in kinds(REAL_KEYS[0][:20] + " " + REAL_KEYS[0][20:])

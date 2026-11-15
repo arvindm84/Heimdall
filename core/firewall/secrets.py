@@ -12,6 +12,7 @@ agent's auth header to the gateway, so seeing one anywhere else is a theft attem
 Findings carry a masked preview only. A secret must never end up in an event or log.
 """
 
+import base64
 import math
 import re
 from collections import Counter
@@ -65,7 +66,32 @@ def scan(text: str, real_keys: Iterable[str], fake_keys: Iterable[str]) -> list[
 
 
 def exact(text: str, secret: str, kind: str) -> list[Finding]:
-    return [Finding(kind, m.start(), m.end(), mask(secret)) for m in re.finditer(re.escape(secret), text)]
+    """One of our own keys, as it is or thinly disguised.
+
+    We know these keys exactly, so cheap disguises can be matched without guessing:
+    split up with spaces or line breaks, reversed, in hex, or in base64. Anything
+    cleverer (encrypted, spread over several calls) still gets through.
+    """
+    spaced = r"\s*".join(re.escape(char) for char in secret)
+    # Hex can be written in either case, so the disguised forms are matched ignoring case.
+    disguised = "|".join(re.escape(form) for form in sorted(disguises(secret)))
+    matches = [*re.finditer(spaced, text), *re.finditer(disguised, text, re.IGNORECASE)]
+    return [Finding(kind, m.start(), m.end(), mask(secret)) for m in matches]
+
+
+def disguises(secret: str) -> set[str]:
+    """The secret reversed, in hex, and in base64 (standard and URL-safe)."""
+    raw = secret.encode()
+    forms = {secret[::-1], raw.hex()}
+    # Inside a longer base64 blob the secret can start at any of three byte positions,
+    # and each gives different characters. Keep the characters that depend on the secret alone.
+    for shift in range(3):
+        encoded = base64.b64encode(b"\0" * shift + raw).decode().rstrip("=")
+        start = (shift * 8 + 5) // 6
+        end = len(encoded) - (1 if (shift + len(raw)) % 3 else 0)
+        forms.add(encoded[start:end])
+        forms.add(encoded[start:end].replace("+", "-").replace("/", "_"))
+    return forms
 
 
 def secret_assignments(text: str) -> list[Finding]:
