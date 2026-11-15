@@ -1,0 +1,29 @@
+{
+  "model": {
+    "default": "default",
+    "provider": "anthropic"
+  },
+  "platform_toolsets": {
+    "cli": []
+  },
+  "memory": {
+    "memory_enabled": false,
+    "user_profile_enabled": false
+  },
+  "mcp_servers": {
+    "heimdall": {
+      "url": "http://gateway:8080/mcp",
+      "timeout": 130,
+      "tools": {
+        "include": []
+      }
+    }
+  },
+  "telemetry": {
+    "shared_metrics": {
+      "enabled": false,
+      "send": false,
+      "offer_version": 2
+    }
+  }
+}

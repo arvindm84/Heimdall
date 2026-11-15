@@ -1,5 +1,6 @@
 import json
 import os
+import re
 
 import httpx
 from mcp.server.fastmcp import FastMCP
@@ -11,7 +12,12 @@ OPENROUTER_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 OPENROUTER_MODEL = os.environ.get("OPENROUTER_MODEL", "anthropic/claude-haiku-4.5")
 ANTHROPIC_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-5-5")
-FAKE_KEY = "sk-fake-openclaw-01"
+GEMINI_KEY = os.environ.get("GEMINI_API_KEY", "")
+GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3-flash-preview")
+GEMINI_URL = "https://generativelanguage.googleapis.com"
+FAKE_KEY_PREFIX = "sk-fake-"
+HERMES_READ_TOOL = "mcp__heimdall__files_read"
+SCRIPTED = os.environ.get("HEIMDALL_SCRIPTED") == "1"
 FAKE_FILES = {"notes.txt": "Canned text from the fake gateway. Contact: {{EMAIL_1}}"}
 
 mcp = FastMCP(
@@ -48,10 +54,14 @@ def scripted_reply(body: dict) -> dict:
     for block in blocks:
         if block.get("type") == "tool_result":
             return {"type": "text", "text": f"The tool returned: {json.dumps(block.get('content'))}"}
-    read_tool = next((t["name"] for t in body.get("tools", []) if t["name"].endswith("files_read")), None)
-    if read_tool is None:
-        return {"type": "text", "text": "Fake model: no files_read tool was offered to me."}
-    return {"type": "tool_use", "id": "toolu_fake_01", "name": read_tool, "input": {"path": "notes.txt"}}
+    names = [t["name"] for t in body.get("tools", [])]
+    read_tool = next((name for name in names if name.endswith("files_read")), None)
+    if read_tool:
+        return {"type": "tool_use", "id": "toolu_fake_01", "name": read_tool, "input": {"path": "notes.txt"}}
+    if "tool_call" in names:
+        call = {"name": HERMES_READ_TOOL, "arguments": {"path": "notes.txt"}}
+        return {"type": "tool_use", "id": "toolu_fake_01", "name": "tool_call", "input": {"calls": [call]}}
+    return {"type": "text", "text": "Fake model: no files_read tool was offered to me."}
 
 
 def sse(event: str, data: dict) -> str:
@@ -78,7 +88,7 @@ def stream_events(message: dict):
 
 async def forward_to_provider(request: Request, path: str, body: dict):
     sent_key = request.headers.get("x-api-key") or request.headers.get("authorization", "")
-    if FAKE_KEY not in sent_key:
+    if FAKE_KEY_PREFIX not in sent_key:
         log("model_blocked", reason="agent did not send its fake key")
         return JSONResponse({"error": "unknown key"}, status_code=401)
     if OPENROUTER_KEY:
@@ -92,12 +102,15 @@ async def forward_to_provider(request: Request, path: str, body: dict):
     for name in ("anthropic-version", "anthropic-beta"):
         if name in request.headers:
             headers[name] = request.headers[name]
+    log("model_route", model=body.get("model"))
+    return await relay_upstream(url, {**headers, "content-type": "application/json"}, {}, json.dumps(body).encode())
+
+
+async def relay_upstream(url: str, headers: dict, params: dict, content: bytes) -> StreamingResponse:
     client = httpx.AsyncClient(timeout=300)
-    upstream = await client.send(
-        client.build_request("POST", url, headers=headers, json=body),
-        stream=True,
-    )
-    log("model_forwarded", url=url, model=body.get("model"), status=upstream.status_code)
+    request = client.build_request("POST", url, headers=headers, params=params, content=content)
+    upstream = await client.send(request, stream=True)
+    log("model_forwarded", url=url, status=upstream.status_code)
 
     async def relay():
         async for chunk in upstream.aiter_bytes():
@@ -108,6 +121,37 @@ async def forward_to_provider(request: Request, path: str, body: dict):
     return StreamingResponse(
         relay(), status_code=upstream.status_code, media_type=upstream.headers.get("content-type")
     )
+
+
+@mcp.custom_route("/gemini/{path:path}", methods=["GET", "POST"])
+async def gemini(request: Request):
+    path = request.path_params["path"]
+    if request.method == "GET" or not path.endswith(("GenerateContent", "generateContent", "chat/completions")):
+        log("gemini_other", method=request.method, path=path)
+        return JSONResponse({"models": []}, status_code=200 if request.method == "GET" else 404)
+    sent_key = (
+        request.headers.get("x-goog-api-key")
+        or request.query_params.get("key")
+        or request.headers.get("authorization", "")
+    )
+    raw = await request.body()
+    body = json.loads(raw)
+    tools = [f["name"] for t in body.get("tools", []) for f in t.get("functionDeclarations", [])]
+    tools += [t["function"]["name"] for t in body.get("tools", []) if "function" in t]
+    log("model_call", api_key=sent_key.removeprefix("Bearer "), model=path, tools_offered=tools)
+    if FAKE_KEY_PREFIX not in sent_key:
+        log("model_blocked", reason="agent did not send its fake key")
+        return JSONResponse({"error": "unknown key"}, status_code=401)
+    if not GEMINI_KEY:
+        return JSONResponse({"error": "GEMINI_API_KEY is not set in the gateway"}, status_code=400)
+    if "model" in body:
+        raw = json.dumps({**body, "model": GEMINI_MODEL}).encode()
+    path = re.sub(r"models/[^/:]+", f"models/{GEMINI_MODEL}", path)
+    params = {k: v for k, v in request.query_params.items() if k != "key"}
+    headers = {"x-goog-api-key": GEMINI_KEY, "content-type": "application/json"}
+    if path.endswith("chat/completions"):
+        headers = {"authorization": f"Bearer {GEMINI_KEY}", "content-type": "application/json"}
+    return await relay_upstream(f"{GEMINI_URL}/{path}", headers, params, raw)
 
 
 @mcp.custom_route("/model/{path:path}", methods=["GET", "POST"])
@@ -123,7 +167,7 @@ async def model(request: Request):
         model=body.get("model"),
         tools_offered=[t["name"] for t in body.get("tools", [])],
     )
-    if OPENROUTER_KEY or ANTHROPIC_KEY:
+    if not SCRIPTED and (OPENROUTER_KEY or ANTHROPIC_KEY):
         return await forward_to_provider(request, path, body)
     block = scripted_reply(body)
     message = {
