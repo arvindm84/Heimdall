@@ -1,11 +1,12 @@
 """Gateway settings, read from the gateway container's environment.
 
-Step 1 adds each agent's permissions from /config/agents/<agent>/permissions.json,
-which B's agent manager writes.
+Each agent's permissions are not here: they are read from
+<agents_dir>/<agent>/permissions.json on every tool call (core/firewall/permissions.py).
 """
 
 import os
 from dataclasses import dataclass, field
+from pathlib import Path
 
 
 @dataclass(frozen=True)
@@ -18,6 +19,9 @@ class GatewaySettings:
     mock: bool = False
     gemini_key: str = ""
     anthropic_key: str = ""
+    # Where B's agent manager mounts permissions.json files and the user's folders.
+    agents_dir: Path = Path("/config/agents")
+    folders_dir: Path = Path("/data/folders")
 
 
 def parse_fake_keys(text: str) -> dict[str, str]:
@@ -40,4 +44,6 @@ def load_settings(env: dict[str, str] | None = None) -> GatewaySettings:
         mock=env.get("HEIMDALL_PROVIDER") == "mock",
         gemini_key=env.get("GEMINI_API_KEY", ""),
         anthropic_key=env.get("ANTHROPIC_API_KEY", ""),
+        agents_dir=Path(env.get("HEIMDALL_AGENTS_DIR", "/config/agents")),
+        folders_dir=Path(env.get("HEIMDALL_FOLDERS_DIR", "/data/folders")),
     )
