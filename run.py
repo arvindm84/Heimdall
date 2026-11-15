@@ -4,7 +4,7 @@
 
 1. Starts the Flask back end on 127.0.0.1:8765 (debug off), in the background.
 2. Opens a native window (pywebview) showing the UI that Flask serves.
-3. Closing the window quits everything.
+3. Closing the window kills every agent container (and the gateway), then quits.
 
 The UI must be built first: cd frontend && npm run build
 For frontend development, use `npm run dev` in frontend/ instead (live reload in the browser).
@@ -18,6 +18,7 @@ import urllib.request
 import webview  # pywebview
 
 from backend.app import FRONTEND_DIST, PORT, app
+from backend.services import agent_service
 
 URL = f"http://127.0.0.1:{PORT}/"
 
@@ -50,7 +51,11 @@ def main() -> None:
     wait_until_up()
 
     webview.create_window("Heimdall", URL, width=1280, height=840, min_size=(960, 640), background_color="#111714")
-    webview.start()
+    webview.start()  # returns when the window is closed
+
+    # Heimdall closed: no agent keeps running unwatched.
+    print("Stopping all agents…")
+    agent_service.kill_all()
 
 
 if __name__ == "__main__":

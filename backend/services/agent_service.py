@@ -11,6 +11,7 @@ Launch agents one at a time: two launches at once would both run docker
 compose and rewrite the same gateway config file.
 """
 
+import subprocess
 from pathlib import Path
 
 from agents import manager
@@ -77,6 +78,21 @@ def kill_agent(agent: str) -> None:
     """Kill and remove the agent's container (the kill switch)."""
     manager.kill_agent(agent)
     _opened.pop(agent, None)
+
+
+def kill_all() -> None:
+    """Kill and remove every Heimdall container: both agents, their chat UIs and the gateway.
+
+    Called by run.py when the app window closes, so no agent keeps running with nobody
+    watching. Covers agents started by an earlier run of the app too. Never raises:
+    closing the app must work even when Docker is stopped or missing.
+    """
+    _opened.clear()
+    try:
+        # --timeout 0: kill at once instead of waiting 10 seconds for each container.
+        manager.compose("down", "--timeout", "0")
+    except (OSError, subprocess.CalledProcessError) as error:
+        print(f"Couldn't stop the agents' containers: {error}")
 
 
 def list_agents() -> dict:
