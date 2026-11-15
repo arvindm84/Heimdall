@@ -31,6 +31,19 @@ What changed for you with the real gateway:
 
 - Also on the firewall side (Step 4): `agents/gateway/compose.yaml` mounts the made-up inbox `tests/firewall/fixtures/inbox` read-only at `/data/inbox`, for `gmail_read` in fixture mode. It moves to D's `attacks/` once the demo attack email lives there.
 
+## Firewall Steps 5 and 6 (what changed for you)
+
+- New tools `gmail_draft` and `gmail_send`. List them in `AgentPermissions.tools` like any other tool; your config builders already pass them through (tested live with OpenClaw).
+- Text that `files_read` returns from a Confidential folder now comes wrapped in `<<confidential:id>> ... <</confidential:id>>`. The agent should keep it as is. On calls to a cloud model, the user is asked once per file, and a denied file's text is replaced with `[withheld by Heimdall: Confidential content, consent denied]`.
+
+## Waiting on B: the local model (scene 6, second half)
+
+The gateway side is done and tested with a fake Ollama: any model call under `/model/local/` goes to Ollama on the host (`OLLAMA_URL`, default `http://host.docker.internal:11434/v1/chat/completions`), is still scanned for keys, and never asks for consent. To use it:
+
+1. `agents/manager.py`: add a provider, for example `PROVIDERS["local"] = "llama3.2:3b"` (any model pulled into Ollama).
+2. `agents/openclaw/agent.py`: for `local`, set the `heimdall` provider's `baseUrl` to `http://gateway:8080/model/local` and `api` to `openai-completions`. Hermes: the same base URL with its OpenAI-style client.
+3. Ollama running on the host with that model pulled (`ollama pull llama3.2:3b`). It isn't installed on A's laptop, so this part hasn't been run end to end.
+
 ## Later
 
 - Firewall Step 4 (Gmail): mount `data/credentials.json` and `data/token.json` read-only into the gateway.

@@ -219,20 +219,32 @@ Branch: `firewall-approved-send`
 
 ## Step 6: consent on model calls (about 1 h)
 
-Branch: `firewall/consent`
+Branch: `firewall-consent`
 
 **Tests first:**
-- `test_consent.py`: a request holding a Confidential marker to a cloud provider asks once; approve lets the same marker through later calls without asking; deny replaces that tool-result block with `[withheld by Heimdall: Confidential content, consent denied]` and still forwards the request; the request stays valid (every `tool_use` still has its `tool_result`); a local-model request is never asked; markers stripped by the agent are still caught by the text fallback.
+- `test_consent.py`: Confidential text comes back in markers, Private text doesn't. A cloud request holding it asks once (`kind: consent`, with file, folder and provider); approve lets it through later calls without asking. Deny replaces that tool-result block with `[withheld by Heimdall: Confidential content, consent denied]`, still forwards the request, keeps it valid (the tool call still has its result), and is remembered. Both OpenAI-style and Anthropic-style requests. Markers stripped by the agent are caught by the text. Unrelated tool results are left alone. A local-model request is never asked, gets no real key, and is still scanned for keys. A new run starts with no markers or answers. A failed ask is a remembered deny. Mock mode asks too. `gmail_send` and `web_fetch` after a Confidential read ask with `kind: consent`.
+- Seam test with C: `test_gateway_core.py::test_consent_question_reaches_the_dashboard`.
+- Seam test `tests/seams/test_scene6_consent.py`: scene 6 with real OpenClaw on Gemini and C's back end.
 
 **Build:**
-1. Files tool wraps Confidential results in markers and stores the id and text in SQLite (`confidential_markers`).
-2. Proxy step: find markers (then text chunks), check `consent_decisions`, ask the core with `kind: consent` and the file name, rewrite on deny, record the answer.
-3. `gmail_send` and `web_fetch` also ask for consent when the session label is Confidential.
+1. `core/firewall/confidential.py`: `ConfidentialStore` in the same SQLite file as the vault (`confidential_markers`, `consent_decisions`), and `files_in(text, served)`: marker ids first, then any normalized line of 16 or more characters from the served text.
+2. Guard: `files_read` from a Confidential folder wraps the text (after placeholders) in `<<confidential:id>> ... <</confidential:id>>` and records it for the session.
+3. `core/proxy/consent.py`: on every cloud model call, find tool results holding served Confidential text, ask once per file per session (one question at a time per session), record the answer, replace denied blocks. A `model_withheld` event names the files.
+4. `core/proxy/model_route.py`: `/model/local/...` goes to Ollama (`OLLAMA_URL`) with no key and no consent step.
+5. Policy: `send_with_confidential` and `fetch_with_confidential` ask with `kind: consent`. `Decision` has an `ask` field for that.
 
 **Done when:** scene 6 runs: deny, the request goes out without the file text; switch the agent to the local model, the same task runs with no pop-up.
 
+**Result (Nov 15):** the first half is done. With real OpenClaw on Gemini, the agent read `taxes/return.txt`, the consent question reached C's back end with the file name and "Gemini", and after Deny the request still went to Gemini without the text. The agent answered that consent was denied and it couldn't tell the refund. The file's numbers aren't in the gateway logs. The second half (the local model) is built and tested on the gateway side with a fake Ollama. It waits on B adding a `local` provider and on Ollama being installed; see `handoff-firewall-to-agents.md`.
+
+**Known limits:**
+- Only tool results are checked. Confidential text the agent copies into its own messages, or rewords, is not caught (fingerprints in Step 7 help with copies only).
+- Consent is per file per run. A deny caused by a dead back end is remembered too, so the agent isn't stuck waiting on every call; reopening the agent asks again.
+- The agent picks `/model/local` by its base URL, which B sets. Choosing local can only keep data on the machine, so this can't be used to skip consent for a cloud call.
+
 **Issues to file:**
-- C: consent answers `allow_once`, `always_folder`, `deny` on `/raise` and `/response` (until then, approve is treated as allow for this session).
+- C: consent answers `allow_once`, `always_folder`, `deny` on `/raise` and `/response` (until then, approve is treated as allow for this run). The shape of every question is in `handoff-firewall-to-app.md`.
+- B: a `local` provider pointing at `http://gateway:8080/model/local` (details in `handoff-firewall-to-agents.md`).
 
 ## Step 7: extras, only if steps 0 to 6 are merged and the demo runs
 

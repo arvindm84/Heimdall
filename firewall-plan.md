@@ -82,7 +82,7 @@ Agents point their provider base URL at `http://gateway:8080/model`. For each re
 5. Confidential content going to a cloud provider: find the tool-result blocks whose text the gateway itself returned from Confidential folders (markers, then exact match on normalized text; fingerprints later). Ask for consent. On deny, replace those blocks with a short "withheld" note and forward the rest. Local model: skip this step.
 6. Pick the upstream from the API the agent speaks. B's agent manager sets that API from the provider the user chose. OpenAI-style `chat/completions` goes to Gemini's OpenAI-compatible endpoint, with Google's thought-signature placeholder on replayed tool calls. Anthropic-style `messages` goes to Anthropic. Set the real key and relay the response as a stream so chat replies still stream. No real key for that provider: 502. Provider errors are passed on, and the first 500 characters are logged.
 
-The handler is `async`, so a consent wait does not freeze other traffic. `HEIMDALL_PROVIDER=mock` answers in both API styles with a scripted reply and no network, for tests and offline demos. The agent's model name passes through for now; Step 3 checks it against what the user picked. Ollama (local model) is added when the local-model scene is built.
+The handler is `async`, so a consent wait does not freeze other traffic. `HEIMDALL_PROVIDER=mock` answers in both API styles with a scripted reply and no network, for tests and offline demos. The agent's model name passes through for now; Step 3 checks it against what the user picked. The local model is any call under `/model/local/`, which goes to Ollama on the host (`OLLAMA_URL`) and skips consent.
 
 ### Sanitizer and injection signal (scene 3 must work with no network)
 

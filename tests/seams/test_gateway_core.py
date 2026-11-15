@@ -9,6 +9,7 @@ and no network beyond 127.0.0.1. All addresses are made up.
 from pathlib import Path
 
 import anyio
+import httpx
 import pytest
 from mcp.server.fastmcp.exceptions import ToolError
 
@@ -91,3 +92,32 @@ async def test_dead_back_end_means_deny(gateway, monkeypatch):
     with pytest.raises(ToolError, match="send_needs_approval"):
         await send(app, to)
     assert outbox(settings) == []
+
+
+async def test_consent_question_reaches_the_dashboard(core, tmp_path):
+    """A model call holding Confidential file text raises kind "consent" with the file and provider."""
+    url, _ = core
+    settings = make_world(tmp_path, tools=("files_read",))
+    app = build_gateway(settings, sessions=Sessions())  # mock model: nothing leaves the machine
+    with mcp_request(AS_OPENCLAW):
+        result = (await app.call_tool("files_read", {"path": "taxes/summary.txt"}))[0].text
+    body = {
+        "model": "gemini-flash-lite-latest",
+        "messages": [
+            {"role": "assistant", "tool_calls": [{"id": "c1", "type": "function", "function": {"name": "f", "arguments": "{}"}}]},
+            {"role": "tool", "tool_call_id": "c1", "content": result},
+        ],
+    }
+    transport = httpx.ASGITransport(app=app.streamable_http_app())
+    async with anyio.create_task_group() as tasks:
+
+        async def agent_calls_model():
+            async with httpx.AsyncClient(transport=transport, base_url="http://gateway") as client:
+                await client.post("/model/chat/completions", json=body, headers={"authorization": AS_OPENCLAW})
+
+        tasks.start_soon(agent_calls_model)
+        raised = await anyio.to_thread.run_sync(core_backend.Dashboard(url).next)
+        assert (raised["kind"], raised["file"], raised["folder"], raised["provider"]) == (
+            "consent", "taxes/summary.txt", "taxes", "Gemini"
+        )
+        assert await anyio.to_thread.run_sync(core_backend.answer, url, raised["request_id"], "deny") == 200
