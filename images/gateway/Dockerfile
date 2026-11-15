@@ -12,9 +12,9 @@ ENV UV_PROJECT_ENVIRONMENT=/opt/venv \
 
 WORKDIR /app
 # Dependencies first so code changes don't reinstall them.
-# Only the gateway group: no pytest in the image.
+# Only the gateway group: no pytest, and none of the app's own dependencies (Flask, pywebview).
 COPY pyproject.toml uv.lock ./
-RUN uv sync --frozen --no-default-groups --group gateway --no-install-project
+RUN uv sync --frozen --only-group gateway --no-install-project
 COPY core ./core
 
 # The gateway holds the real keys; don't run it as root.

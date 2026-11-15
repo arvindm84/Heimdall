@@ -199,7 +199,7 @@ Branch: `firewall-approved-send`
 **Tests first:**
 - `test_gmail_send.py`: send always asks; the pop-up text shows the real recipient and body after filling in placeholders; approve sends exactly once; deny and a failed ask send nothing; a placeholder from another session, or one that doesn't exist, is refused before asking; the recipient must be one address or one `{{EMAIL_n}}`; a subject with a line break (header injection) is refused; a key in the mail is refused before asking; the agent gets back its own placeholders, never the real values; events never hold the real values; `gmail_draft` keeps placeholders as they are and asks nothing.
 - Seam test, with C: `tests/seams/test_gateway_core.py` runs C's real Flask back end in a thread: `test_send_waits_for_approval` (raise, answer through `/response`, tool finishes), `test_no_answer_means_deny` and `test_dead_back_end_means_deny`.
-- Seam test `tests/seams/test_scene5_send.py`: scene 5 with real containers and C's back end on port 5000.
+- Seam test `tests/seams/test_scene5_send.py`: scene 5 with real containers and C's back end on port 8765.
 
 **Build:**
 1. `tools/gmail.py`: `check_message` (fixture mode only for now, one recipient, one-line subject) and `save`, which writes an `.eml`. Drafts go to `/state/drafts/`, sent mail in fixture mode to `/state/outbox/`, both in the `gateway-state` volume.
@@ -212,10 +212,9 @@ Branch: `firewall-approved-send`
 
 **Not built yet:** live Gmail sending (same OAuth setup as live reading).
 
-**Found on the way (C's back end):** each `/events` connection is a thread that takes the next question off one shared queue. If the dashboard reconnects (a page reload), the old connection's thread still takes the next question and loses it, so that pop-up never shows and the agent waits 120 s for a deny. The seam tests keep one `/events` connection open, like the real dashboard should.
+**Found on the way (C's back end; fixed by C on main, Nov 15, and covered by `test_a_reconnected_dashboard_still_gets_the_question`):** each `/events` connection is a thread that takes the next question off one shared queue. If the dashboard reconnects (a page reload), the old connection's thread still takes the next question and loses it, so that pop-up never shows and the agent waits 120 s for a deny. The seam tests keep one `/events` connection open, like the real dashboard should.
 
 **Issues to file:**
-- C: questions lost when the dashboard reconnects to `/events` (above). A fix: keep unanswered questions in `_waiting` with their details and send all of them to every new `/events` connection.
 
 ## Step 6: consent on model calls (about 1 h)
 
@@ -267,7 +266,7 @@ Each firewall promise in `firewall-plan.md` and `project-plan.md`, checked again
 | Only the chosen provider, or the local model | Works once B writes `provider` into `permissions.json` | `test_consent.py::test_only_the_chosen_provider_is_reached`; one line for B in the handoff |
 | Local model with no consent question | Gateway side works with a fake Ollama | Waits on B's `local` provider and Ollama on the demo laptop |
 | Every decision in an audit log that streams to the dashboard | Works on our side once C has the endpoint | Events go to stdout and, with `HEIMDALL_EVENTS_URL` set, are posted one by one in the background (`test_core_client.py`); the endpoint is proposed in `handoff-firewall-to-app.md` |
-| Approval and consent pop-ups through the back end | Works with C's current `/raise` | `test_gateway_core.py`; two back-end bugs written up for C |
+| Approval and consent pop-ups through the back end | Works with C's back end from main (Nov 15: `/api/raise` on port 8765) | `test_gateway_core.py`, scenes 5 and 6 live; the lost-pop-up bug is fixed; `/api/response` still has no token |
 | Memory: every note labelled, Confidential notes need consent | Not built | Hermes memory lives in its own container, so notes never pass the gateway. Step 7 work with B |
 | Check the model name against what the user picked | Not built | The model name passes through; only the provider is checked |
 | Live Gmail read and send | Not built | Needs the test account's OAuth files on the demo laptop |

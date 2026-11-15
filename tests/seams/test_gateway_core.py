@@ -1,8 +1,8 @@
 """Seam 2 (A and C): the gateway asks the user through C's real back end.
 
 C's Flask app (backend/app.py) runs in a thread on a free local port. The gateway's
-gmail_send raises a question with POST /raise, the "dashboard" here reads it from
-GET /events and answers with POST /response, and the tool call finishes. No Docker
+gmail_send raises a question with POST /api/raise, the "dashboard" here reads it from
+GET /api/events and answers with POST /api/response, and the tool call finishes. No Docker
 and no network beyond 127.0.0.1. All addresses are made up.
 """
 
@@ -121,3 +121,17 @@ async def test_consent_question_reaches_the_dashboard(core, tmp_path):
             "consent", "taxes/summary.txt", "taxes", "Gemini"
         )
         assert await anyio.to_thread.run_sync(core_backend.answer, url, raised["request_id"], "deny") == 200
+
+
+async def test_a_reconnected_dashboard_still_gets_the_question(core, gateway):
+    """A page reload mid-question: the new /api/events connection is sent what is still pending."""
+    url, _ = core
+    app, settings, to = gateway
+    async with anyio.create_task_group() as tasks:
+        tasks.start_soon(send, app, to)
+        first = await anyio.to_thread.run_sync(core_backend.Dashboard(url).next)
+        # The first tab "reloads": a new connection opens and must show the same question.
+        again = await anyio.to_thread.run_sync(core_backend.Dashboard(url).next)
+        assert again["request_id"] == first["request_id"]
+        assert await anyio.to_thread.run_sync(core_backend.answer, url, again["request_id"], "approve") == 200
+    assert len(outbox(settings)) == 1

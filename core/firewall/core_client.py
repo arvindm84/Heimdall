@@ -1,6 +1,6 @@
 """The firewall's only link to the core: emit events and ask the user.
 
-Today the core is C's Flask back end (POST /raise on main). Everything else in
+Today the core is C's Flask back end (POST /api/raise on port 8765). Everything else in
 the firewall goes through these two functions, so moving to a WebSocket later
 changes only this file.
 
@@ -16,7 +16,7 @@ import threading
 import httpx
 
 # The gateway runs in Docker; the back end runs on the host.
-CORE_URL = os.environ.get("CORE_URL", "http://host.docker.internal:5000")
+CORE_URL = os.environ.get("CORE_URL", "http://host.docker.internal:8765")
 # The back end waits 120 s for the user; OpenClaw waits 130 s for a tool.
 # 125 s sits between them, so the back end's own deny reaches us first.
 ASK_TIMEOUT_SECONDS = 125
@@ -78,7 +78,7 @@ async def ask(
     body = {**details, "container_id": agent, "question": question, "kind": kind}
     try:
         async with httpx.AsyncClient(timeout=ASK_TIMEOUT_SECONDS, transport=transport) as client:
-            response = await client.post(f"{CORE_URL}/raise", json=body)
+            response = await client.post(f"{CORE_URL}/api/raise", json=body)
             response.raise_for_status()
             # ValueError: not JSON. KeyError/TypeError: JSON without a "decision" field.
             decision = response.json()["decision"]

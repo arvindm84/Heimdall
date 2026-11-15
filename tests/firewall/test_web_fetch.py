@@ -48,14 +48,14 @@ PAGE = (
     "url",
     [
         "http://localhost/",
-        "http://127.0.0.1:5000/raise",
+        "http://127.0.0.1:8765/api/raise",
         "http://10.0.0.5/",
         "http://172.16.3.4/",
         "http://192.168.1.1/admin",
         "http://169.254.169.254/latest/meta-data/",
         "http://[::1]/",
         "http://[::ffff:127.0.0.1]/",
-        "http://host.docker.internal:5000/raise",
+        "http://host.docker.internal:8765/api/raise",
         "http://gateway:8080/mcp",
         "http://sneaky.example/",
         "http://mixed.example/",
@@ -214,7 +214,7 @@ async def test_url_carrying_a_key_is_refused(gateway, events):
 
 async def test_internal_address_is_refused_through_the_gateway(gateway, events):
     gw, _, asked = gateway
-    assert "private_address" in await refused(gw, "http://host.docker.internal:5000/raise")
+    assert "private_address" in await refused(gw, "http://host.docker.internal:8765/api/raise")
     assert asked == []
 
 

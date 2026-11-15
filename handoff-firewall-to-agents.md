@@ -38,11 +38,13 @@ What changed for you with the real gateway:
 
 ## Waiting on B: the chosen provider (one line)
 
+C's `/api/launch` already passes the user's provider to `manager.open_agent`; only `write_permissions` needs to record it.
+
 The gateway now refuses model calls to a cloud provider the user didn't choose (`provider_not_chosen`), but only when `permissions.json` says which one. In `agents/manager.py`, pass `provider` into `write_permissions` and add it to the file: `"provider": provider` next to `"run_id"`. The values are the keys of `PROVIDERS` (`gemini`, `anthropic`, later `local`). Calls to the local model are always allowed. Without the field nothing changes.
 
 ## Later, when C has an events endpoint
 
-Set `HEIMDALL_EVENTS_URL` in `agents/gateway/compose.yaml` to C's endpoint (for example `http://host.docker.internal:5000/event`). The gateway then posts every event there as well as printing it.
+Set `HEIMDALL_EVENTS_URL` in `agents/gateway/compose.yaml` to C's endpoint (for example `http://host.docker.internal:8765/api/event`). The gateway then posts every event there as well as printing it.
 
 ## Waiting on B: the local model (scene 6, second half)
 

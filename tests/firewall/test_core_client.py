@@ -1,6 +1,6 @@
 """Step 0: ask() passes the user's answer through, and anything wrong means deny.
 
-The back end's /raise is faked with httpx.MockTransport.
+The back end's /api/raise is faked with httpx.MockTransport.
 """
 
 import json

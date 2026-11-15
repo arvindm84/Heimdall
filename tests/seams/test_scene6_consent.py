@@ -1,6 +1,6 @@
 """Scene 6 with real containers: OpenClaw on Gemini reads a Confidential file; the user denies consent.
 
-C's back end runs on the host at port 5000. The agent's turn uses the real model
+C's back end runs on the host at port 8765. The agent's turn uses the real model
 (needs GEMINI_API_KEY in .env), so the model decides when to call files_read; the
 checks are on what the gateway did, not on the model's wording. The tax file is made up.
 """
@@ -18,7 +18,7 @@ RETURN = "Made-up 2025 return for Jordan Lee.\nAdjusted gross income: 71,250.\nR
 
 @pytest.fixture(scope="module")
 def core():
-    url, _, server = core_backend.start(port=5000)
+    url, _, server = core_backend.start(port=8765)
     yield url, core_backend.Dashboard(url)
     server.shutdown()
 
