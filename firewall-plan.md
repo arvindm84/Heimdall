@@ -10,7 +10,7 @@ The main lesson from the research: **detectors alone do not hold.** "The Attacke
 
 1. **The back end is Flask, not the WebSocket core.** C's back end is in `backend/` on `main` (not on this branch). The firewall-to-core seam today is `POST /raise` (`backend/app.py`, `backend/services/notification_service.py`), which blocks up to 120 s and returns `{"decision": "approve" | "deny"}`. There is no endpoint for plain events, and no "always for this folder" answer. The firewall talks to the core only through one small adapter (`core_client.py`), so it works against `/raise` now and a WebSocket later. Timeouts line up: back end 120 s < our client 125 s < OpenClaw's MCP `requestTimeoutMs` 130 s.
 2. **Tool names cannot contain dots.** The Claude API requires tool names to match `^[a-zA-Z0-9_-]{1,128}$`. Use `files_read`, `gmail_send`, and so on. OpenClaw adds its own prefix, so the model sees `heimdall__files_read`; the gateway registers the bare name.
-3. **The agents merge settled how agents reach us** (`images/openclaw/openclaw.json`, `compose.yaml`, `images/fake-gateway/server.py`):
+3. **The agents merge settled how agents reach us** (now `agents/openclaw/config.json`, `agents/hermes/config.json`, `agents/gateway/compose.yaml`, and B's stand-in `agents/gateway/server.py`):
    - Model calls use a **base URL**, `http://gateway:8080/model`, with the fake key in `x-api-key`. They are not HTTPS through a forward proxy. So the model proxy is a reverse-proxy route inside the gateway, not mitmproxy: no CA certificate, no `HTTPS_PROXY`, no second process.
    - Agents sit on `agents-net`, which is `internal: true`. They can reach the gateway and nothing else. Blocking egress to other hosts is the network's job; the agent cannot choose which host its model call goes to, because the gateway picks the upstream from the agent's configured provider.
    - One FastMCP (MCP SDK v1) process serves both `/mcp` and `/model/*` on port 8080, with `stateless_http=True`. There is no MCP session, so agent identity must come from a header on each call.
@@ -67,7 +67,7 @@ Events are JSON lines on stdout with a `kind` field, the same format as B's fake
 | `gmail_draft` | Allow. Placeholders stay as placeholders |
 | `gmail_send` | Always ask. The pop-up shows the final recipient and body after placeholders are filled in. Consent as well if the session label is Confidential |
 | `web_fetch` | GET only. Never fill in placeholders. Deny if the URL holds a key or a placeholder. Ask if the session is untrusted or above Public. Marks the session untrusted |
-| Model call | Sent to the agent's configured provider only. Rules below |
+| Model call | Sent only to the provider for the API the agent speaks. Rules below |
 
 Placeholders are filled in only at `gmail_send`, only after approval, and only from this session's vault. This matters: an injected "send `{{SSN_1}}` to x@evil.com" would otherwise make the firewall leak the real value itself. The approval pop-up showing the real recipient and text is the control.
 
@@ -80,9 +80,9 @@ Agents point their provider base URL at `http://gateway:8080/model`. For each re
 3. Fake key anywhere except the auth header: block, emit `key_theft_attempt`.
 4. Scan the body: exact match against the real keys the gateway holds, provider key formats, `.env`-shaped blocks. Block on a hit.
 5. Confidential content going to a cloud provider: find the tool-result blocks whose text the gateway itself returned from Confidential folders (markers, then exact match on normalized text; fingerprints later). Ask for consent. On deny, replace those blocks with a short "withheld" note and forward the rest. Local model: skip this step.
-6. Pick the upstream from the agent's provider (`anthropic`, `openrouter`, `ollama`, or `mock` for tests), set the real key and the chosen model, and relay the response as a stream so chat replies still stream.
+6. Pick the upstream from the API the agent speaks. B's agent manager sets that API from the provider the user chose. OpenAI-style `chat/completions` goes to Gemini's OpenAI-compatible endpoint, with Google's thought-signature placeholder on replayed tool calls. Anthropic-style `messages` goes to Anthropic. Set the real key and relay the response as a stream so chat replies still stream. No real key for that provider: 502. Provider errors are passed on, and the first 500 characters are logged.
 
-The handler is `async`, so a consent wait does not freeze other traffic. `mock` returns a scripted reply with no network, for tests and for B. OpenRouter is only for made-up data (CLAUDE.md).
+The handler is `async`, so a consent wait does not freeze other traffic. `HEIMDALL_PROVIDER=mock` answers in both API styles with a scripted reply and no network, for tests and offline demos. The agent's model name passes through for now; Step 3 checks it against what the user picked. Ollama (local model) is added when the local-model scene is built.
 
 ### Sanitizer and injection signal (scene 3 must work with no network)
 
@@ -139,7 +139,7 @@ Test fixtures are made-up emails, files and keys only. For injection tests, writ
 ## Verification
 
 1. `uv run pytest tests/firewall` for each module, with the attack fixtures.
-2. `uv run pytest -m docker tests/runtime` (B's tests) against the real gateway, and `tests/seams/test_agent_gateway.py`: OpenClaw calls `files_read`, gets placeholders; its model call reaches a mock upstream with the real key.
+2. `uv run pytest` (B's `agents/` tests, Docker included, plus ours) against the real gateway, and `tests/seams/test_agent_gateway.py`: OpenClaw calls `files_read`, gets placeholders; its model call reaches a mock upstream with the real key.
 3. `tests/seams/test_gateway_core.py`: the firewall raises an approval, the test answers through `/response`, the tool call finishes; no answer means deny.
 4. By hand on the demo laptop: run scenes 3 to 6 from the command line and check each event in the `/events` stream.
 5. `python scripts/smoke.py` once D has it, before each merge.

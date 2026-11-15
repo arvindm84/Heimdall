@@ -38,11 +38,11 @@ Branch: `firewall/skeleton`
 **Build:**
 1. `core/firewall/__init__.py`, `core/proxy/__init__.py` (same package style as `core/contracts/`).
 2. `core/firewall/core_client.py`: `emit(kind, **fields)` prints one JSON line; `async ask(kind, agent, question, details) -> "approve" | "deny"` posts to `{CORE_URL}/raise` with a 125 s timeout and returns `"deny"` on any error, with an event saying why.
-3. `core/proxy/model_route.py`: the `/model/{path}` route: fake-key check, `model_call` event, upstream by provider (`mock`, `anthropic`, `openrouter`), streamed relay.
+3. `core/proxy/model_route.py`: the `/model/{path}` route: fake-key check, `model_call` event, upstream by API style (`chat/completions` to Gemini, `messages` to Anthropic), streamed relay. `core/proxy/mock_model.py`: scripted replies in both styles.
 4. `core/gateway.py`: FastMCP on `0.0.0.0:8080`, path `/mcp`, tools `files_read(path)` (canned text) and `files_list()`, each emitting `{"kind": "tool_call", ...}`; registers the model route. For Step 0 the fake keys and provider come from the environment; Step 1 replaces that with config.
 5. `pyproject.toml`: a `gateway` dependency group. `images/gateway/Dockerfile` (`python:3.11-slim`, uv, `uv sync --frozen --no-dev --group gateway`, build context = repo root), root `.dockerignore` keeping `.env` and `data/` out of the build context.
 
-**Done when:** with the compose `gateway` service pointed at `images/gateway` (a local override until B switches it), `uv run pytest -m docker tests/runtime` passes, and OpenClaw's `files_read` call shows as a `tool_call` line in `docker compose logs gateway`. (It reaches the dashboard once C adds an events endpoint; see issues.)
+**Done when:** with `agents/gateway/compose.yaml` pointed at `images/gateway`, `uv run pytest` passes (B's tests for OpenClaw and Hermes, Docker included, with a real `GEMINI_API_KEY`), and each agent's `files_read` shows as a `tool_call` line naming that agent. Result (Nov 14): 53 passed; both agents identified by their bearer key; no real key in the gateway logs. (It reaches the dashboard once C adds an events endpoint; see issues.)
 
 **Issues to file:**
 - C: an endpoint the gateway can POST plain events to (no waiting), and where `/events` already streams them.
@@ -170,7 +170,7 @@ Branch: `firewall/consent`
 
 ## Checks before each merge
 
-1. `uv run pytest tests/firewall`, `uv run pytest -m docker tests/runtime` when the gateway image changed, and the seam tests touched by the step.
+1. `uv run pytest -m "not docker"` every time; plain `uv run pytest` (Docker, needs `GEMINI_API_KEY`) when the gateway image changed; and the seam tests touched by the step.
 2. `python scripts/smoke.py` once D has it.
 3. `/code-review`, then the verifier subagent after merging.
 4. Write the step's real numbers (Presidio time, injection fixture pass count) in the PR, not estimates.
