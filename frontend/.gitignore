@@ -1,2 +1,4 @@
 node_modules/
 dist/
+# Vite's dependency cache: rebuilt by `npm run dev` on each machine.
+.vite/
