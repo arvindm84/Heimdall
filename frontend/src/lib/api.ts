@@ -14,6 +14,12 @@ export type LaunchConfig = {
   model?: string;
 };
 
+// Folder access, from the popup before an agent's first start.
+export type Label = "public" | "private" | "confidential";
+export type Folder = { name: string; path: string };
+// Only the folders the user clicked. Others take their nearest clicked parent's label, else public.
+export type FolderLabels = Record<string, Label>;
+
 type AgentsResponse = {
   agents: { name: string; chat: ChatLogin | null }[];
   providers: { name: string; default_model: string }[];
@@ -61,6 +67,12 @@ export const api = {
   launch: (agent: string, config: LaunchConfig) => call<ChatLogin>("/launch", { agent, config }),
   stop: (agent: string) => call<{ status: string }>("/stop", { agent }),
   kill: (agent: string) => call<{ status: string }>("/kill", { agent }),
+  // Subfolders of a folder (leave out path for the home folder). 403 if the system won't open it.
+  folders: (path?: string) =>
+    call<{ path: string; folders: Folder[] }>(`/folders${path ? `?path=${encodeURIComponent(path)}` : ""}`),
+  // An agent's saved folder labels; null if the user hasn't been asked yet.
+  folderLabels: (agent: string) => call<{ labels: FolderLabels | null }>(`/folder-labels?agent=${agent}`),
+  saveFolderLabels: (agent: string, labels: FolderLabels) => call<void>("/folder-labels", { agent, labels }),
   // The user's answer to a firewall question. 404 if it already timed out.
   respond: (request_id: string, decision: "approve" | "deny") =>
     call<{ status: string }>("/response", { request_id, decision }),

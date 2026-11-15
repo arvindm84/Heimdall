@@ -11,6 +11,9 @@ Routes (all under /api):
     POST /api/kill      Kill and remove an agent's container.                    (owner: launch/kill)
     GET  /api/keys      Which providers have a real API key saved in the app.    (owner: launch/kill)
     POST /api/keys      Save or remove a provider's real API key.                (owner: launch/kill)
+    GET  /api/folders   Subfolders of a folder, for the folder-access popup.
+    GET  /api/folder-labels   An agent's saved folder labels (null: not asked yet).
+    POST /api/folder-labels   Save an agent's folder labels.
     POST /api/raise     Firewall reports a blocked request to the dashboard.     (owner: raise/response)
     POST /api/event     Firewall reports a decision for the activity feed.       (owner: launch/kill)
     GET  /api/events    Stream the dashboard listens on: questions and events.   (owner: raise/response)
@@ -32,7 +35,7 @@ from pathlib import Path
 
 from flask import Flask, Response, jsonify, request, send_from_directory
 
-from backend.services import agent_service, event_service, key_service, notification_service
+from backend.services import agent_service, event_service, folder_service, key_service, notification_service
 
 # Not 5000: macOS AirPlay Receiver uses that port.
 PORT = 8765
@@ -119,6 +122,12 @@ def program_missing(error):
     return jsonify({"error": str(error)}), 500
 
 
+@app.errorhandler(PermissionError)
+def no_permission(error):
+    # The system won't let us open a folder (on macOS: Documents, Desktop... until the user allows it).
+    return jsonify({"error": "Your computer didn't let Heimdall open this folder."}), 403
+
+
 @app.errorhandler(TimeoutError)
 def chat_timeout(error):
     # The container started but its chat never answered.
@@ -196,6 +205,33 @@ def save_key():
         return jsonify({"error": "key must be a string"}), 400
 
     key_service.set_key(body["provider"], body["key"])
+    return "", 204
+
+
+@app.get("/api/folders")
+def folders():
+    # Query: ?path=/Users/you/Documents (leave out for the home folder).
+    # Returns: {"path", "folders": [{"name", "path"}]}. Only folders inside home.
+    # The folder-access popup calls this each time the user opens a folder in the tree.
+    return jsonify(folder_service.list_folders(request.args.get("path"))), 200
+
+
+@app.get("/api/folder-labels")
+def folder_labels():
+    # Query: ?agent=openclaw
+    # Returns: {"labels": {folder path: "public" | "private" | "confidential"}},
+    # or {"labels": null} if the user hasn't been asked yet (the UI then shows the popup).
+    return jsonify({"labels": folder_service.get_labels(request.args.get("agent", ""))}), 200
+
+
+@app.post("/api/folder-labels")
+def save_folder_labels():
+    # Body: {"agent": "openclaw", "labels": {folder path: label}}. Replaces that agent's labels.
+    body = request.get_json(silent=True) or {}
+    if err := missing(body, "agent", "labels"):
+        return err
+
+    folder_service.save_labels(body["agent"], body["labels"])
     return "", 204
 
 
