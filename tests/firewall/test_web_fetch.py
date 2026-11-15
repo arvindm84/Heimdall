@@ -145,7 +145,13 @@ async def test_error_status_is_refused():
 
 @pytest.fixture
 def gateway(tmp_path):
-    asked, transport = site({"https://garden.example/": httpx.Response(200, html=PAGE)})
+    asked, transport = site({
+        "https://garden.example/": httpx.Response(200, html=PAGE),
+        # A page whose declared charset doesn't exist: decoding it raises LookupError.
+        "https://garden.example/odd": httpx.Response(
+            200, content=b"<p>hi</p>", headers={"content-type": "text/html; charset=x-bogus"}
+        ),
+    })  # fmt: skip
     sessions = Sessions()
     settings = make_world(tmp_path, tools=("web_fetch", "files_read"))
     return build_gateway(settings, transport=transport, sessions=sessions, resolve=resolve), sessions, asked
@@ -230,3 +236,16 @@ async def test_internal_address_is_refused_without_asking_even_after_untrusted(g
     await fetch(gw, "https://garden.example/")
     assert "private_address" in await refused(gw, "http://169.254.169.254/latest/meta-data/")
     assert asked_user == []
+
+
+async def test_a_key_in_the_url_is_reported_once(gateway, events):
+    gw, _, _ = gateway
+    message = await refused(gw, "https://garden.example/?k=sk-fake-openclaw-01")
+    assert message.count("fake_key") == 1
+
+
+async def test_an_unexpected_failure_is_refused_with_one_event(gateway, events):
+    gw, _, _ = gateway
+    assert "tool_failed" in await refused(gw, "https://garden.example/odd")
+    [event] = [e for e in events if e["kind"] == "tool_call"]
+    assert (event["decision"], event["rule_id"], event["reason"]) == ("deny", "tool_failed", "the tool failed (LookupError)")

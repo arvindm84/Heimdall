@@ -137,17 +137,20 @@ def make_model_route(
         if blocked is not None:
             return blocked
         local = path.startswith(LOCAL_PREFIX)
+        # Fail closed, as the tools do: an agent Heimdall didn't open (or whose permissions
+        # file is unreadable or names another key) gets no model access.
         try:
             run = permissions.load(settings.agents_dir, agent, key)
-        except NoPermissions:
-            run = None  # no permissions, no file tools: nothing Confidential can have been served
+        except NoPermissions as error:
+            core_client.emit("model_blocked", agent=agent, path=path, rule_id="no_permissions", reason=str(error))
+            return JSONResponse({"error": f"Heimdall blocked this request: {error}"}, status_code=403)
         # Only the provider the user chose, or the local model (which keeps data on the machine).
-        chosen = run.provider if run else None
+        chosen = run.provider
         if chosen and not local and provider_id(path) != chosen:
             reason = f"the user chose {chosen} for this agent, not {provider_id(path)}"
             core_client.emit("model_blocked", agent=agent, path=path, rule_id="provider_not_chosen", reason=reason)
             return JSONResponse({"error": f"Heimdall blocked this request: {reason}"}, status_code=403)
-        if not local and run is not None and consent is not None and sessions is not None:
+        if not local and consent is not None and sessions is not None:
             await withhold_denied(body, agent, run, path, consent, sessions)
         if settings.mock:
             return mock_model.reply(path, body)

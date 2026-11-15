@@ -1,7 +1,9 @@
 """Helpers the firewall tests import. All keys, files and folders here are made up."""
 
 import json
+import tempfile
 from contextlib import contextmanager
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -39,6 +41,19 @@ def write_permissions(agents_dir: Path, permissions: AgentPermissions, run_id: s
     path.parent.mkdir(parents=True, exist_ok=True)
     content = {"run_id": run_id, "fake_key": key, "permissions": permissions.model_dump()}
     path.write_text(json.dumps(content), encoding="utf-8")
+
+
+def opened(settings: GatewaySettings) -> GatewaySettings:
+    """These settings with permissions.json files for every agent in them, as if B's manager had
+    opened each one (the model proxy refuses agents it didn't open). Uses a fresh temp folder,
+    which also holds the gateway's state, so tests never write to /state."""
+    agents_dir = Path(tempfile.mkdtemp(prefix="heimdall-agents-"))
+    for key, agent in settings.fake_keys.items():
+        path = agents_dir / agent / "permissions.json"
+        path.parent.mkdir(parents=True)
+        content = {"run_id": "run-1", "fake_key": key, "permissions": AgentPermissions().model_dump()}
+        path.write_text(json.dumps(content), encoding="utf-8")
+    return replace(settings, agents_dir=agents_dir, state_dir=agents_dir / "state")
 
 
 def make_world(tmp_path: Path, tools=("files_list", "files_read", "files_write")) -> GatewaySettings:

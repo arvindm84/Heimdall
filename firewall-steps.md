@@ -272,6 +272,19 @@ Each firewall promise in `firewall-plan.md` and `project-plan.md`, checked again
 | Live Gmail read and send | Not built | Needs the test account's OAuth files on the demo laptop |
 | Scene 4: a visible "blocked" moment for raw network calls | Not built (B and D) | Agents have no internet, so a raw upload just fails; the tripwire covers every route through the gateway |
 
+## Code review before merging to main (Nov 15)
+
+`/code-review` on everything `firewall` adds. Fixed, each with a test:
+- The model proxy forwarded calls for an agent with no readable `permissions.json`; it now refuses them (`no_permissions`), as the tools do.
+- Text from a Confidential (or Private) folder could be written into a lower-label folder without asking, and would come back unmarked in a later run. Now `write_to_lower_label` asks (consent when the session is Confidential).
+- Session label, untrusted flag and delimiter lived only in memory. B's manager recreates the gateway when folder mounts change (opening a second agent), so a running agent came back Public and trusted. They are now kept in SQLite.
+- An unexpected error inside a tool (a page with an unknown charset, an unreadable file) skipped the `tool_call` event. It is now refused as `tool_failed` with one event.
+- One file read under two spellings (`taxes/./a.txt`) got two consent questions; files are now named by their resolved path.
+- A key in a `web_fetch` URL was reported twice.
+- DNS lookups for `web_fetch` ran on the event loop, so a slow DNS server stalled every agent; they now run in a thread.
+
+Not changed: the provider check waits on B (`firewall-integration.md`); consent checks only tool results (known limit, Step 6); edits to B's files were made with the user's OK and are listed in the integration guide.
+
 ## Step 7: extras, only if steps 0 to 6 are merged and the demo runs
 
 - Winnowing fingerprints (k = 30 characters, window 20) for Confidential text that has been edited.

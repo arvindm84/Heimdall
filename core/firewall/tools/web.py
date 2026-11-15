@@ -14,6 +14,7 @@ import ipaddress
 import socket
 from collections.abc import Callable
 
+import anyio
 import httpx
 
 from core.firewall import sanitize
@@ -69,7 +70,8 @@ async def fetch(url: str, resolver: Resolver, transport: httpx.AsyncBaseTranspor
     """GET the page, following redirects by hand so each hop is checked."""
     async with httpx.AsyncClient(transport=transport, follow_redirects=False, timeout=TIMEOUT_SECONDS) as client:
         for _ in range(MAX_REDIRECTS + 1):
-            check_url(url, resolver)
+            # Off the event loop: a slow DNS server must not stall other agents' calls.
+            await anyio.to_thread.run_sync(check_url, url, resolver)
             try:
                 async with client.stream("GET", url, headers={"user-agent": "heimdall-gateway"}) as response:
                     if response.is_redirect:

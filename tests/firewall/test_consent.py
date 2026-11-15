@@ -311,3 +311,11 @@ async def test_only_the_chosen_provider_is_reached(world, asked, events, chosen,
 async def test_no_provider_in_permissions_keeps_the_old_behaviour(world, asked):
     settings, gateway, seen, sessions = world
     assert (await post(gateway, "v1/messages", anthropic_request("hi"))).status_code == 200
+
+
+async def test_one_file_spelled_two_ways_is_asked_about_once(world, asked):
+    settings, gateway, seen, sessions = world
+    first = await read(gateway, "taxes/return.txt")
+    second = await read(gateway, "taxes/./return.txt")
+    await post(gateway, "chat/completions", openai_request(first + second))
+    assert [details["file"] for _, details, _ in asked] == ["taxes/return.txt"]

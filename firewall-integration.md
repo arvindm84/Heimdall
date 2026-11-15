@@ -51,7 +51,7 @@ Use a tool timeout of 130 s: an approval can wait up to 125 s. Both agents' conf
 |---|---|---|
 | `files_list` | `folder` (optional) | Lists the agent's folders, or the files in one |
 | `files_read` | `path` = `<folder>/<path>` | Text or PDF; placeholders in place of personal data; Confidential text wrapped in `<<confidential:id>>` markers, which the agent should keep |
-| `files_write` | `path`, `text` | Only in writable folders; asks after untrusted content |
+| `files_write` | `path`, `text` | Only in writable folders; asks after untrusted content, or when the session holds data above the folder's label |
 | `gmail_read` | `query`, `limit` | Fixture inbox for now; cleaned and wrapped as untrusted |
 | `gmail_draft` | `to`, `subject`, `body` | Saves a draft in the gateway; never asks |
 | `gmail_send` | `to`, `subject`, `body` | Always asks; fills in placeholders after approval |
@@ -73,7 +73,7 @@ Only the tools listed in the agent's permissions are offered to the model (`buil
 ```
 
 - `run_id`: a new one starts a new session (new labels, new placeholder numbering, consent answers forgotten).
-- `fake_key` must match the key the agent sends, or every call is refused.
+- `fake_key` must match the key the agent sends, or every call is refused. Without a readable file the agent gets no tools and no model calls (`no_permissions`).
 - `permissions` is `AgentPermissions` from `core/contracts/agents.py`. Folder paths are stored resolved; the gateway finds each folder by its last path part.
 - **[B] `provider`: not written yet.** Pass `provider` from `open_agent` into `write_permissions` and add `"provider": provider` to the file. Once it's there, the gateway refuses model calls to any other cloud provider (`provider_not_chosen`), as `project-plan.md` section 6 requires ("checks the destination is your chosen provider"). The local model is always allowed. Without the field, any provider is allowed. C's `/api/launch` already passes the provider to `open_agent`.
 
@@ -114,6 +114,7 @@ Always present: `kind` (`approval` or `consent`), `container_id` (the agent's na
 | Case | `kind` | Extra fields | What the pop-up should show |
 |---|---|---|---|
 | File write or web fetch after the agent read mail or a web page | `approval` | `tool`, `path` (file path or URL) | Who, what, where (`project-plan.md` section 5) |
+| File write into a folder with a lower label than the data the agent holds | `consent` if the agent read Confidential data, else `approval` | `tool`, `path` | That the data would lose its label |
 | `gmail_send` | `approval` | `tool`, `to`, `subject`, `body` | The final email with real values. The user approves exactly what is sent |
 | `gmail_send` or `web_fetch` after a Confidential read | `consent` | as the two rows above | That Confidential data may be in it |
 | A model call holding a Confidential file's text | `consent` | `file` (`taxes/return.txt`), `folder` (`taxes`), `provider` (`Gemini`, `Anthropic`) | "Hermes wants to send part of taxes/return.txt to Anthropic" |
@@ -141,7 +142,7 @@ Every decision is one JSON object with a `kind` field. Today they go to the gate
 | `injection_check` | `agent`, `tool`, `verdict` (`flagged`, `not_flagged`, `not_checked`), `quote` or `reason`, `model` | The AI second opinion. `not_checked` must never be shown as "clean" |
 | `model_call` | `agent`, `api_key` (always the fake key), `model`, `tools_offered` | Feed line; a line on the flow map |
 | `model_forwarded` | `agent`, `url`, `model`, `status` | The call reached the provider |
-| `model_blocked` | `agent` (missing for an unknown key), `path`, `rule_id`, `reason`, `findings` (kind and masked preview) | Red: `key_theft_attempt` is scene 4's moment; also `secret_in_request`, `provider_not_chosen` |
+| `model_blocked` | `agent` (missing for an unknown key), `path`, `rule_id`, `reason`, `findings` (kind and masked preview) | Red: `key_theft_attempt` is scene 4's moment; also `secret_in_request`, `provider_not_chosen`, `no_permissions` |
 | `model_withheld` | `agent`, `path`, `rule_id` (`consent_denied`), `files` | Scene 6: the request went out without these files |
 | `consent` | `agent`, `file`, `provider`, `decision` | The user's consent answer |
 | `model_other`, `model_error`, `model_upstream_error`, `ask_failed` | `agent` and details | Diagnostics. `ask_failed` means a question didn't reach the user and counted as a deny |

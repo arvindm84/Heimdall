@@ -50,7 +50,7 @@ def build_gateway(
     # The injection check's model call needs an Anthropic key, and is skipped in offline (mock) mode.
     if checker is None and settings.anthropic_key and not settings.mock:
         checker = AsyncAnthropic(api_key=settings.anthropic_key)
-    sessions = sessions or Sessions()
+    sessions = sessions or Sessions(settings.state_dir / "gateway.db")
     # Confidential text served and the user's consent answers, shared by the tools and the model proxy.
     confidential = ConfidentialStore(settings.state_dir / "gateway.db")
     guard = Guard(settings, sessions, Vault(settings.state_dir / "gateway.db"), checker, confidential)

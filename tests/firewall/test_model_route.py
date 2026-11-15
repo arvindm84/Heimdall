@@ -12,7 +12,7 @@ from starlette.testclient import TestClient
 
 from core.firewall.config import GatewaySettings
 from core.gateway import build_gateway
-from tests.firewall.helpers import FAKE_KEY
+from tests.firewall.helpers import FAKE_KEY, opened
 
 GEMINI_KEY = "AIza-test-not-a-real-key"
 ANTHROPIC_KEY = "sk-ant-test-not-a-real-key"
@@ -35,7 +35,7 @@ AS_OPENCLAW = {"authorization": f"Bearer {FAKE_KEY}"}
 
 def client_for(settings, transport=None):
     """HTTP client for the whole gateway app; transport fakes the model provider."""
-    return TestClient(build_gateway(settings, transport=transport).streamable_http_app())
+    return TestClient(build_gateway(opened(settings), transport=transport).streamable_http_app())
 
 
 def recording_provider(seen: list[httpx.Request], status: int = 200, body: dict | None = None):
@@ -207,3 +207,12 @@ def test_mock_openai_streams(mock_settings, events):
     assert lines[-1] == "data: [DONE]"
     first = json.loads(lines[0].removeprefix("data: "))
     assert first["choices"][0]["delta"]["tool_calls"][0]["function"]["name"] == "heimdall__files_read"
+
+
+def test_agent_without_permissions_gets_no_model_access(events):
+    seen: list[httpx.Request] = []
+    # Not opened(): no permissions.json for this agent.
+    app = build_gateway(LIVE, transport=recording_provider(seen)).streamable_http_app()
+    response = TestClient(app).post("/model/chat/completions", json=OPENAI_REQUEST, headers=AS_OPENCLAW)
+    assert response.status_code == 403 and seen == []
+    assert [e["rule_id"] for e in events if e["kind"] == "model_blocked"] == ["no_permissions"]
