@@ -3,4 +3,6 @@ plan.md
 uv.lock
 pyproject.toml
 project-plan.md
-backend/services/__pycache__/
+__pycache__/
+.claude/skills/eyes/
+.claude/skills/frontend-design/

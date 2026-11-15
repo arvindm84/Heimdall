@@ -1,2 +1,3 @@
 flask
 docker
+pywebview==6.2.1
