@@ -1,6 +1,7 @@
 #!/bin/sh
 set -e
-mkdir -p ~/.openclaw
+mkdir -p ~/.openclaw/workspace
+cp /opt/heimdall/workspace/* ~/.openclaw/workspace/
 cp /config/openclaw.json ~/.openclaw/openclaw.json
 chmod 600 ~/.openclaw/openclaw.json
 node /app/openclaw.mjs gateway &

@@ -14,8 +14,8 @@
         "api": "anthropic-messages",
         "models": [
           {
-            "id": "claude-sonnet-5-5",
-            "name": "Claude Sonnet 5.5 via Heimdall",
+            "id": "default",
+            "name": "Model chosen in Heimdall",
             "reasoning": false,
             "input": ["text"],
             "contextWindow": 200000,
@@ -25,7 +25,7 @@
       }
     }
   },
-  "agents": { "defaults": { "model": { "primary": "heimdall/claude-sonnet-5-5" } } },
+  "agents": { "defaults": { "model": { "primary": "heimdall/default" }, "skipBootstrap": true } },
   "tools": { "profile": "minimal", "alsoAllow": ["bundle-mcp"], "deny": ["session_status", "gateway"] },
   "mcp": {
     "servers": {

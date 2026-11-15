@@ -10,6 +10,7 @@ from starlette.responses import JSONResponse, StreamingResponse
 OPENROUTER_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 OPENROUTER_MODEL = os.environ.get("OPENROUTER_MODEL", "anthropic/claude-haiku-4.5")
 ANTHROPIC_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-5-5")
 FAKE_KEY = "sk-fake-openclaw-01"
 FAKE_FILES = {"notes.txt": "Canned text from the fake gateway. Contact: {{EMAIL_1}}"}
 
@@ -87,6 +88,7 @@ async def forward_to_provider(request: Request, path: str, body: dict):
     else:
         url = f"https://api.anthropic.com/{path}"
         headers = {"x-api-key": ANTHROPIC_KEY}
+        body = {**body, "model": ANTHROPIC_MODEL}
     for name in ("anthropic-version", "anthropic-beta"):
         if name in request.headers:
             headers[name] = request.headers[name]
