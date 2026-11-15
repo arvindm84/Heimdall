@@ -10,6 +10,7 @@ export type ResourceId = "files" | "gmail" | "web" | "model";
 export type FirewallEvent = {
   id: number;
   time: string; // "14:02:11"
+  at: number; // when the back end got it, in ms (Date.now() scale). The Flow page glows only for recent ones
   agent: string; // "openclaw", "hermes", or "unknown" when the call had no known key
   resource: ResourceId | null; // null: not tied to one resource (left off the Flow graph)
   action: string; // tool name, or "messages" for a model call
@@ -70,6 +71,7 @@ export function fromGateway(raw: Record<string, any>): FirewallEvent | null {
   const base = {
     id: Number(raw.id),
     time: str(raw.time).slice(11, 19),
+    at: Date.parse(str(raw.time)), // local time, same computer as the back end
     agent: str(raw.agent) || "unknown",
     rule: str(raw.rule_id),
   };

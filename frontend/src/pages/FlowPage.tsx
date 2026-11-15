@@ -31,6 +31,9 @@ import { TOOL_VERB } from "../data/tools";
 const STEP_MS = 1200; // next queued event (a burst of events plays one by one)
 const HOP_MS = 650; // a dot travelling one edge
 const MOVE_MS = 600; // nodes sliding to a new layout
+// Events older than this are history (sent again on every connection): drawn, but not played.
+const LIVE_MS = 5000;
+const GLOW_MS = 3000; // how long a request's path stays lit (the dot takes 3 hops x HOP_MS)
 const MAX_DESTINATIONS = 8;
 
 const ROW_Y = { agent: 0, gate: 130, category: 300, destination: 450 };
@@ -74,6 +77,22 @@ function destinationOf(e: Drawn): { key: string; label: string; full: string } {
   // Same host or inbox = same node; files are told apart by full path.
   return { key: `${e.resource}:${e.resource === "files" ? e.target : label}`, label, full: e.target };
 }
+
+// Add (or refresh) the destination an event went to; past MAX_DESTINATIONS the stalest retires.
+// n: how many events have been played so far, used to order destinations and find the stalest.
+function withDestination(prev: Destination[], event: Drawn, n: number): Destination[] {
+  const { key, label, full } = destinationOf(event);
+  let next = prev.some((d) => d.key === key)
+    ? prev.map((d) => (d.key === key ? { ...d, verdict: event.verdict, lastUsed: n } : d))
+    : [...prev, { key, label, full, category: event.resource, verdict: event.verdict, lastUsed: n, order: n }];
+  if (next.length > MAX_DESTINATIONS) {
+    const stalest = next.reduce((a, b) => (a.lastUsed <= b.lastUsed ? a : b));
+    next = next.filter((d) => d !== stalest);
+  }
+  return next;
+}
+
+const drawnOf = (events: FirewallEvent[]) => events.filter((e): e is Drawn => e.resource !== null);
 
 // ---------- Layout ----------
 
@@ -150,7 +169,7 @@ function useTween(target: Record<string, XY>) {
 
 const hidden = { opacity: 0 }; // handles exist for edges but aren't shown
 
-type AgentData = { name: string; active: boolean };
+type AgentData = { name: string; active: boolean; running: boolean };
 type GateData = {
   width: number;
   ins: { id: string; pct: number }[];
@@ -167,11 +186,14 @@ type DestinationData = { label: string; full: string; verdict: Verdict; active: 
 function AgentNode({ data }: NodeProps<Node<AgentData>>) {
   return (
     <div
-      className={`rounded-md border bg-raised px-4 py-3 text-center transition-colors ${data.active ? "border-paper" : "border-rule"}`}
+      className={`rounded-md border bg-raised px-4 py-3 text-center transition-[border-color,opacity] ${
+        data.active ? "border-paper" : "border-rule"
+      } ${data.running ? "" : "opacity-50"}`}
       style={{ width: W.agent }}
     >
       <div className="font-bold">{data.name}</div>
-      <div className="text-xs text-lichen">Agent</div>
+      {/* Stopped agents are dimmed: their container is gone, so nothing they did is still happening. */}
+      <div className="text-xs text-lichen">{data.running ? "Running" : "Off"}</div>
       <Handle type="source" position={Position.Bottom} style={hidden} />
     </div>
   );
@@ -317,23 +339,36 @@ const edgeTypes = { flow: FlowEdge };
 
 // ---------- Graph ----------
 
-function FlowGraph({ events, counts, onPlayed }: { events: FirewallEvent[]; counts: Counts; onPlayed: (e: Drawn) => void }) {
-  const [destinations, setDestinations] = useState<Destination[]>([]);
+type GraphProps = { events: FirewallEvent[]; counts: Counts; running: string[] };
+
+function FlowGraph({ events, counts, running }: GraphProps) {
+  // Opening the page: places already reached are drawn at once, unlit. Only events that
+  // arrive while the page is open are played (and glow).
+  const [destinations, setDestinations] = useState<Destination[]>(() =>
+    drawnOf(events).reduce((all, e, i) => withDestination(all, e, i), [] as Destination[]),
+  );
   const [current, setCurrent] = useState<Drawn | null>(null);
   // In refs so React's dev-mode double mount doesn't replay events.
   const queue = useRef<Drawn[]>([]);
-  const lastQueued = useRef(-1); // id of the newest event put in the queue
-  const step = useRef(0); // plays so far: orders destinations and finds the stalest
+  const lastQueued = useRef(drawnOf(events).at(-1)?.id ?? -1); // id of the newest event already drawn or queued
+  const step = useRef(drawnOf(events).length); // plays so far: orders destinations and finds the stalest
 
-  // New events join the queue. On first open, only the latest few, so the page doesn't replay the whole history.
+  // New events: ones from the last few seconds join the play queue (and glow).
+  // Older ones are history the back end sends again on every connection: drawn quietly.
   useEffect(() => {
-    const drawn = events.filter((e): e is Drawn => e.resource !== null);
+    const drawn = drawnOf(events);
     // A smaller newest id means the back end restarted (ids start again at 1).
     if (drawn.length && drawn[drawn.length - 1].id < lastQueued.current) lastQueued.current = -1;
     const fresh = drawn.filter((e) => e.id > lastQueued.current);
     if (!fresh.length) return;
-    queue.current.push(...(lastQueued.current < 0 ? fresh.slice(-MAX_DESTINATIONS) : fresh));
     lastQueued.current = fresh[fresh.length - 1].id;
+
+    const now = Date.now();
+    const old = fresh.filter((e) => !(now - e.at < LIVE_MS)); // also old when the time didn't parse
+    queue.current.push(...fresh.filter((e) => now - e.at < LIVE_MS));
+    const first = step.current;
+    step.current += old.length;
+    if (old.length) setDestinations((prev) => old.reduce((all, e, i) => withDestination(all, e, first + i), prev));
   }, [events]);
 
   // Play the next queued event, adding its destination if it's new and retiring the stalest one.
@@ -342,31 +377,28 @@ function FlowGraph({ events, counts, onPlayed }: { events: FirewallEvent[]; coun
       const event = queue.current.shift();
       if (!event) return;
       const n = step.current++;
-      const { key, label, full } = destinationOf(event);
-
-      setDestinations((prev) => {
-        const existing = prev.find((d) => d.key === key);
-        let next = existing
-          ? prev.map((d) => (d.key === key ? { ...d, verdict: event.verdict, lastUsed: n } : d))
-          : [...prev, { key, label, full, category: event.resource, verdict: event.verdict, lastUsed: n, order: n }];
-        if (next.length > MAX_DESTINATIONS) {
-          const stalest = next.reduce((a, b) => (a.lastUsed <= b.lastUsed ? a : b));
-          next = next.filter((d) => d !== stalest);
-        }
-        return next;
-      });
+      setDestinations((prev) => withDestination(prev, event, n));
       setCurrent(event);
-      onPlayed(event);
     };
     play();
     const timer = setInterval(play, STEP_MS);
     return () => clearInterval(timer);
-  }, [onPlayed]);
+  }, []);
+
+  // The glow means "happening now": it fades GLOW_MS after a request. A newer one restarts the timer.
+  useEffect(() => {
+    if (!current) return;
+    const t = setTimeout(() => setCurrent(null), GLOW_MS);
+    return () => clearTimeout(t);
+  }, [current]);
+
+  // A stopped agent's path goes dark at once, even mid-glow.
+  const lit = current && running.includes(current.agent) ? current : null;
 
   const plan = useMemo(() => layout(destinations), [destinations]);
   const positions = useTween(plan.positions);
-  const currentKey = current ? destinationOf(current).key : null;
-  const stampAt = current ? plan.ins.find((h) => h.id === current.agent)?.pct ?? 50 : 50;
+  const currentKey = lit ? destinationOf(lit).key : null;
+  const stampAt = lit ? plan.ins.find((h) => h.id === lit.agent)?.pct ?? 50 : 50;
 
   // Build nodes from the (animated) positions.
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
@@ -377,19 +409,19 @@ function FlowGraph({ events, counts, onPlayed }: { events: FirewallEvent[]; coun
         id: a.id,
         type: "agent",
         position: at(a.id),
-        data: { name: a.name, active: current?.agent === a.id },
+        data: { name: a.name, active: lit?.agent === a.id, running: running.includes(a.id) },
       })),
       {
         id: "gate",
         type: "gate",
         position: at("gate"),
-        data: { width: plan.gateWidth, ins: plan.ins, outs: plan.outs, current, stampAt, counts },
+        data: { width: plan.gateWidth, ins: plan.ins, outs: plan.outs, current: lit, stampAt, counts },
       },
       ...CATEGORIES.map((c) => ({
         id: c.id,
         type: "category",
         position: at(c.id),
-        data: { label: c.label, icon: c.icon, active: current?.verdict === "allowed" && current.resource === c.id },
+        data: { label: c.label, icon: c.icon, active: lit?.verdict === "allowed" && lit.resource === c.id },
       })),
       ...destinations.map((d) => ({
         id: d.key,
@@ -403,13 +435,13 @@ function FlowGraph({ events, counts, onPlayed }: { events: FirewallEvent[]; coun
       const byId = new Map(prev.map((n) => [n.id, n]));
       return built.map((n) => ({ ...byId.get(n.id), ...n }));
     });
-  }, [positions, plan, destinations, current, currentKey, stampAt, counts, setNodes]);
+  }, [positions, plan, destinations, lit, currentKey, stampAt, counts, running, setNodes]);
 
-  // Edges: agent -> band -> category -> destination. Only the current request's path lights up.
+  // Edges: agent -> band -> category -> destination. Only the lit request's path lights up.
   const edges: Edge<EdgeData>[] = useMemo(() => {
-    const color = current ? VERDICT_STYLE[current.verdict].hex : null;
-    const allowed = current?.verdict === "allowed";
-    const pulse = current?.id ?? 0;
+    const color = lit ? VERDICT_STYLE[lit.verdict].hex : null;
+    const allowed = lit?.verdict === "allowed";
+    const pulse = lit?.id ?? 0;
     return [
       ...AGENTS.map((a) => ({
         id: `${a.id}-gate`,
@@ -417,7 +449,7 @@ function FlowGraph({ events, counts, onPlayed }: { events: FirewallEvent[]; coun
         target: "gate",
         targetHandle: `in-${a.id}`,
         type: "flow",
-        data: { color: current?.agent === a.id ? color : null, pulse, delay: 0 },
+        data: { color: lit?.agent === a.id ? color : null, pulse, delay: 0 },
       })),
       ...CATEGORIES.map((c) => ({
         id: `gate-${c.id}`,
@@ -425,7 +457,7 @@ function FlowGraph({ events, counts, onPlayed }: { events: FirewallEvent[]; coun
         sourceHandle: `out-${c.id}`,
         target: c.id,
         type: "flow",
-        data: { color: allowed && current?.resource === c.id ? color : null, pulse, delay: HOP_MS },
+        data: { color: allowed && lit?.resource === c.id ? color : null, pulse, delay: HOP_MS },
       })),
       ...destinations.map((d) => ({
         id: `${d.category}-${d.key}`,
@@ -441,7 +473,7 @@ function FlowGraph({ events, counts, onPlayed }: { events: FirewallEvent[]; coun
         },
       })),
     ];
-  }, [current, currentKey, destinations]);
+  }, [lit, currentKey, destinations]);
 
   // Re-frame the camera once nodes have slid into a new layout.
   const { fitView } = useReactFlow();
@@ -472,11 +504,10 @@ function FlowGraph({ events, counts, onPlayed }: { events: FirewallEvent[]; coun
 
 // ---------- Page ----------
 
-type Props = { events: FirewallEvent[]; waitingCount: number };
+type Props = { events: FirewallEvent[]; waitingCount: number; running: string[] }; // running: ids of agents running now
 
-export default function FlowPage({ events, waitingCount }: Props) {
-  const [played, setPlayed] = useState<Drawn[]>([]); // newest first
-  const onPlayed = useMemo(() => (e: Drawn) => setPlayed((prev) => [e, ...prev].slice(0, 4)), []);
+export default function FlowPage({ events, waitingCount, running }: Props) {
+  const latest = useMemo(() => drawnOf(events).slice(-4).reverse(), [events]); // newest first
   // Counted over every event received, not just the ones drawn, so the band never undercounts.
   const counts: Counts = useMemo(
     () => ({
@@ -498,13 +529,13 @@ export default function FlowPage({ events, waitingCount }: Props) {
 
       <div className="mt-8 h-[560px] overflow-hidden rounded-md border border-rule">
         <ReactFlowProvider>
-          <FlowGraph events={events} counts={counts} onPlayed={onPlayed} />
+          <FlowGraph events={events} counts={counts} running={running} />
         </ReactFlowProvider>
       </div>
 
       {/* The last few requests, in sentences */}
       <ol className="mt-6 grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2 lg:grid-cols-4">
-        {played.map((e) => (
+        {latest.map((e) => (
           <li key={e.id} className="border-t border-rule pt-3 text-sm">
             <div className="flex items-baseline justify-between gap-3">
               <span className={`font-bold ${VERDICT_STYLE[e.verdict].text}`}>{VERDICT_STYLE[e.verdict].label}</span>
