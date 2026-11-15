@@ -185,3 +185,44 @@ def test_folders_in_the_launch_request_win_over_saved_labels(client, home, opene
     save(client, "openclaw", {str(home / "Photos"): "public"})
     client.post("/api/launch", json={"agent": "openclaw", "config": {"folders": []}})
     assert opened["openclaw"].folders == []
+
+
+# Review fixes: hidden folders, relative paths and same-named folders are refused on save.
+
+@pytest.mark.parametrize("hidden", [".cache", "Documents/.git"])
+def test_hidden_folders_are_refused(client, home, hidden):
+    response = client.post("/api/folder-labels", json={"agent": "openclaw", "labels": {str(home / hidden): "public"}})
+    assert response.status_code == 400
+    assert folder_service.get_labels("openclaw") is None
+
+
+def test_relative_paths_are_refused(client, home):
+    response = client.post("/api/folder-labels", json={"agent": "openclaw", "labels": {"Documents": "public"}})
+    assert response.status_code == 400
+
+
+def test_two_shared_folders_with_the_same_name_are_refused(client, home):
+    for parent in ("Work", "School"):
+        (home / parent / "notes").mkdir(parents=True)
+    labels = {str(home / "Work" / "notes"): "public", str(home / "School" / "notes"): "private"}
+
+    response = client.post("/api/folder-labels", json={"agent": "openclaw", "labels": labels})
+
+    assert response.status_code == 400
+    assert 'both named "notes"' in response.json["error"]
+
+
+def test_same_name_is_refused_across_agents_too(client, home):
+    # One gateway serves both agents, so their folder names must differ as well.
+    for parent in ("Work", "School"):
+        (home / parent / "notes").mkdir(parents=True)
+    save(client, "openclaw", {str(home / "Work" / "notes"): "public"})
+
+    response = client.post("/api/folder-labels", json={"agent": "hermes", "labels": {str(home / "School" / "notes"): "public"}})
+
+    assert response.status_code == 400
+
+
+def test_both_agents_may_share_the_same_folder(client, home):
+    save(client, "openclaw", {str(home / "Photos"): "public"})
+    save(client, "hermes", {str(home / "Photos"): "private"})

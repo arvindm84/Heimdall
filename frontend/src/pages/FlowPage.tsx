@@ -344,14 +344,15 @@ type GraphProps = { events: FirewallEvent[]; counts: Counts; running: string[] }
 function FlowGraph({ events, counts, running }: GraphProps) {
   // Opening the page: places already reached are drawn at once, unlit. Only events that
   // arrive while the page is open are played (and glow).
+  const [initial] = useState(() => drawnOf(events)); // worked out once, on open
   const [destinations, setDestinations] = useState<Destination[]>(() =>
-    drawnOf(events).reduce((all, e, i) => withDestination(all, e, i), [] as Destination[]),
+    initial.reduce((all, e, i) => withDestination(all, e, i), [] as Destination[]),
   );
   const [current, setCurrent] = useState<Drawn | null>(null);
   // In refs so React's dev-mode double mount doesn't replay events.
   const queue = useRef<Drawn[]>([]);
-  const lastQueued = useRef(drawnOf(events).at(-1)?.id ?? -1); // id of the newest event already drawn or queued
-  const step = useRef(drawnOf(events).length); // plays so far: orders destinations and finds the stalest
+  const lastQueued = useRef(initial.at(-1)?.id ?? -1); // id of the newest event already drawn or queued
+  const step = useRef(initial.length); // plays so far: orders destinations and finds the stalest
 
   // New events: ones from the last few seconds join the play queue (and glow).
   // Older ones are history the back end sends again on every connection: drawn quietly.

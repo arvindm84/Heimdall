@@ -12,10 +12,14 @@ No file yet means the user hasn't been asked, so the popup shows.
 
 import json
 from pathlib import Path
+from typing import get_args
 
 from agents import manager
+from core.contracts.agents import FolderAccess
 
-LABELS = ("public", "private", "confidential")
+# From the shared contract, never retyped. Its order is least to most strict:
+# ("public", "private", "confidential").
+LABELS = get_args(FolderAccess.model_fields["label"].annotation)
 
 # The tree starts here. The popup can't look outside it.
 HOME = Path.home()
@@ -58,9 +62,13 @@ def get_labels(agent: str) -> dict | None:
 
 
 def _inside_home(folder: Path) -> bool:
-    """True for a folder strictly inside the home folder and outside SKIPPED (after following links)."""
+    """True for a folder the popup could show: strictly inside home, not in SKIPPED, and with
+    no hidden part (.ssh, .aws, Projects/.git...). Checked after following links."""
     home, folder = HOME.resolve(), folder.resolve()
-    return home in folder.parents and folder.relative_to(home).parts[0] not in SKIPPED
+    if home not in folder.parents:
+        return False
+    parts = folder.relative_to(home).parts
+    return parts[0] not in SKIPPED and not any(part.startswith(".") for part in parts)
 
 
 def save_labels(agent: str, labels: dict) -> None:
@@ -72,17 +80,45 @@ def save_labels(agent: str, labels: dict) -> None:
         if label not in LABELS:
             raise ValueError(f"label for {path} must be one of: {', '.join(LABELS)}")
         # These paths become folders the agent can read (granted_folders), so the same
-        # limit as the popup's tree applies: nothing outside home.
-        if not _inside_home(Path(path)):
-            raise ValueError(f"folder must be inside your home folder: {path}")
+        # limits as the popup's tree apply: inside home, nothing hidden.
+        folder = Path(path).expanduser()
+        if not folder.is_absolute():
+            raise ValueError(f"folder path must be absolute: {path}")
+        if not _inside_home(folder):
+            raise ValueError(f"folder must be inside your home folder, and not hidden: {path}")
+    _check_names(agent, labels)
 
     file = AGENTS_DIR / agent / "folder_labels.json"
     file.parent.mkdir(parents=True, exist_ok=True)
     file.write_text(json.dumps(labels, indent=2), encoding="utf-8")
 
 
+def _check_names(agent: str, labels: dict) -> None:
+    """Refuse two shared folders with the same name, which would make every launch fail.
+
+    The gateway mounts each shared folder by its name alone (~/Work/notes -> /data/folders/notes,
+    see agents/manager.py), and one gateway serves every agent, so the names must differ
+    across all agents' folders, not just this one's.
+    """
+    others = [f for other in manager.AGENTS if other != agent for f in granted_folders(other)]
+    seen: dict[str, str] = {}
+    for folder in [*_granted(labels), *others]:
+        name = Path(folder["path"]).name
+        first = seen.setdefault(name, folder["path"])
+        if first != folder["path"]:
+            raise ValueError(
+                f"Two shared folders are both named \"{name}\": {first} and {folder['path']}"
+                " (folders are shared by name, across all agents). Share only one of them."
+            )
+
+
 def granted_folders(agent: str) -> list[dict]:
-    """The folders this agent gets at launch, from its saved labels.
+    """The folders this agent gets at launch, from its saved labels. See _granted."""
+    return _granted(get_labels(agent) or {})
+
+
+def _granted(labels: dict) -> list[dict]:
+    """The folders a set of saved labels grants.
 
     Returns [{"path", "label", "write": False}], the shape /api/launch takes as config["folders"].
     This is what makes the labels real: the firewall mounts exactly these folders for this
@@ -104,7 +140,6 @@ def granted_folders(agent: str) -> list[dict]:
     - Read only. The popup has no "may write" choice yet.
     - Folders deleted since, or outside home, are left out.
     """
-    labels = get_labels(agent) or {}
     strictness = {label: rank for rank, label in enumerate(LABELS)}
 
     marked: dict[Path, str] = {}

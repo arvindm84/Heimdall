@@ -8,6 +8,21 @@ const COLUMNS: { label: Label; name: string; hint: string }[] = [
   { label: "confidential", name: "Confidential", hint: "Most sensitive" },
 ];
 
+// Least to most strict, the order COLUMNS lists them in.
+const rank = (label: Label) => COLUMNS.findIndex((c) => c.label === label);
+const nameOf = (label: Label) => COLUMNS[rank(label)].name;
+
+// The folder inside `path` that makes it shared under a stricter label than its own, or null.
+// Same rule as _granted in backend/services/folder_service.py: the firewall has one label per
+// shared folder, so a folder is shared under the strictest label marked anywhere inside it.
+function stricterInside(path: string, own: Label, labels: FolderLabels): { path: string; label: Label } | null {
+  let found: { path: string; label: Label } | null = null;
+  for (const [inside, label] of Object.entries(labels)) {
+    if (inside.startsWith(path + "/") && rank(label) > rank(found?.label ?? own)) found = { path: inside, label };
+  }
+  return found;
+}
+
 // Folder name, then one column per label.
 const ROW = "grid grid-cols-[1fr_6rem_6rem_7rem] items-center";
 
@@ -85,6 +100,7 @@ export default function FolderAccessDialog({ agentName, initial, saveText, onSav
       const chosen = labels[folder.path];
       const label = chosen ?? inherited;
       const isOpen = open.has(folder.path);
+      const stricter = chosen ? stricterInside(folder.path, chosen, labels) : null;
       return (
         <div key={folder.path}>
           <div className={`${ROW} border-b border-rule/60 py-1.5 hover:bg-ground/40`}>
@@ -114,6 +130,13 @@ export default function FolderAccessDialog({ agentName, initial, saveText, onSav
               />
             ))}
           </div>
+          {/* The truth about how it's shared, when that differs from the mark on the row */}
+          {stricter && (
+            <p className="pb-1.5 text-xs text-waiting" style={{ paddingLeft: `${depth * 1.25 + 1.375}rem` }}>
+              Shared as {nameOf(stricter.label)}, because {stricter.path.slice(folder.path.length + 1)} inside it is{" "}
+              {nameOf(stricter.label)}.
+            </p>
+          )}
           {isOpen && (
             <>
               {errors[folder.path] && (

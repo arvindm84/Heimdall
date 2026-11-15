@@ -12,6 +12,7 @@ compose and rewrite the same gateway config file.
 """
 
 import subprocess
+import threading
 from pathlib import Path
 
 from agents import manager
@@ -80,19 +81,30 @@ def kill_agent(agent: str) -> None:
     _opened.pop(agent, None)
 
 
-def kill_all() -> None:
+def kill_all(timeout: float = 20) -> None:
     """Kill and remove every Heimdall container: both agents, their chat UIs and the gateway.
 
     Called by run.py when the app window closes, so no agent keeps running with nobody
-    watching. Covers agents started by an earlier run of the app too. Never raises:
-    closing the app must work even when Docker is stopped or missing.
+    watching. Covers agents started by an earlier run of the app too. Never raises and
+    never waits more than `timeout` seconds: closing the app must work even when Docker
+    is stopped, missing or stuck.
     """
     _opened.clear()
-    try:
-        # --timeout 0: kill at once instead of waiting 10 seconds for each container.
-        manager.compose("down", "--timeout", "0")
-    except (OSError, subprocess.CalledProcessError) as error:
-        print(f"Couldn't stop the agents' containers: {error}")
+
+    def down() -> None:
+        try:
+            # --timeout 0: kill at once instead of waiting 10 seconds for each container.
+            manager.compose("down", "--timeout", "0")
+        except (OSError, subprocess.CalledProcessError) as error:
+            print(f"Couldn't stop the agents' containers: {error}")
+
+    # In a daemon thread so a stuck Docker can't hang the app: if it hasn't answered in
+    # time, we stop waiting and the thread ends with the process.
+    worker = threading.Thread(target=down, daemon=True)
+    worker.start()
+    worker.join(timeout)
+    if worker.is_alive():
+        print("Docker didn't answer in time. The agents' containers may still be running.")
 
 
 def list_agents() -> dict:
