@@ -20,6 +20,8 @@ PHONE = re.compile(r"(?<![\d+])(?:\+1[\s.-]?)?(?:\(\d{3}\)\s?|\d{3}[\s.-])\d{3}[
 SSN = re.compile(r"(?<!\d)(\d{3})-(\d{2})-(\d{4})(?!\d)")
 # 13 to 19 digits, optionally grouped with spaces or dashes.
 CARD = re.compile(r"(?<!\d)\d(?:[ -]?\d){12,18}(?!\d)")
+# Up to four words, then "<local-part@": a display name and the first half of its address.
+NAMED_ADDRESS = re.compile(r"([^\W\d_]+(?: [^\W\d_]+){1,3}) ?<([A-Za-z0-9._%+-]+)@")
 # Lower numbers win when two kinds cover the same text equally.
 PRIORITY = {"EMAIL": 0, "CARD": 1, "SSN": 2, "PHONE": 3, "PERSON": 4}
 
@@ -78,8 +80,26 @@ def nlp():
     return spacy.load("en_core_web_sm", disable=["parser", "lemmatizer", "attribute_ruler", "tagger"])
 
 
-def name_spans(text: str) -> list[Span]:
+def address_names(text: str) -> set[str]:
+    """Display names in front of an address made of the same words: "Priya Raman <priya.raman@...>".
+
+    The small model often misses names in mail headers. Two or more words that all
+    appear in the address are a person's name; "Billing Team <billing@...>" is not.
+    """
     names = set()
+    for match in NAMED_ADDRESS.finditer(text):
+        words = match.group(1).split(" ")
+        parts = {part for part in re.split(r"[._+-]+", match.group(2).lower()) if part}
+        # Only the words next to the address count: "Ask Priya Raman <priya.raman@...>" -> "Priya Raman".
+        while words and not all(word.lower() in parts for word in words):
+            words = words[1:]
+        if len(words) >= 2:
+            names.add(" ".join(words))
+    return names
+
+
+def name_spans(text: str) -> list[Span]:
+    names = address_names(text)
     for entity in nlp()(text).ents:
         if entity.label_ != "PERSON":
             continue

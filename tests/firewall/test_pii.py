@@ -94,3 +94,21 @@ def test_a_300_word_email_takes_under_300_ms_after_warm_up():
     start = time.perf_counter()
     pii.find(EMAIL_300_WORDS)
     assert time.perf_counter() - start < 0.3
+
+
+def test_a_display_name_that_matches_its_address_is_a_person():
+    # The small model misses names in mail headers; the address next to one settles it.
+    text = "From: Priya Raman <priya.raman@example.com>\nSubject: Saturday tools\n\nThanks,\nPriya"
+    assert [value for kind, value in kinds(text) if kind == "PERSON"] == ["Priya Raman", "Priya"]
+
+
+@pytest.mark.parametrize(
+    "header",
+    [
+        "From: Billing Team <billing@vendor.example>",
+        "From: First Lake Bank <alerts@firstlake.example>",
+        "From: Sam <sam.rivera@example.com>",
+    ],
+)
+def test_other_display_names_are_not_guessed_from_the_address(header):
+    assert pii.address_names(header) == set()
