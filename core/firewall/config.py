@@ -28,6 +28,8 @@ class GatewaySettings:
     # "live": the test Gmail account (not set up yet; refused until it is).
     gmail_source: str = "fixture"
     inbox_dir: Path = Path("/data/inbox")
+    # The local model: Ollama's OpenAI-style endpoint on the host.
+    ollama_url: str = "http://host.docker.internal:11434/v1/chat/completions"
 
     def real_keys(self) -> list[str]:
         """The provider keys the gateway holds. Seeing one leave is a leak."""
@@ -59,4 +61,5 @@ def load_settings(env: dict[str, str] | None = None) -> GatewaySettings:
         state_dir=Path(env.get("HEIMDALL_STATE_DIR", "/state")),
         gmail_source=env.get("GMAIL_SOURCE", "fixture"),
         inbox_dir=Path(env.get("HEIMDALL_INBOX_DIR", "/data/inbox")),
+        ollama_url=env.get("OLLAMA_URL", "http://host.docker.internal:11434/v1/chat/completions"),
     )

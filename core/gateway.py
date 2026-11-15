@@ -12,12 +12,14 @@ from anthropic import AsyncAnthropic
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 
+from core.firewall.confidential import ConfidentialStore
 from core.firewall.config import GatewaySettings, load_settings
 from core.firewall.guard import Guard
 from core.firewall.session import Sessions
 from core.firewall.tools import files, gmail, web
 from core.firewall.tools.files import Denied
 from core.firewall.vault import Vault
+from core.proxy.consent import Consent
 from core.proxy.model_route import make_model_route
 
 
@@ -48,7 +50,10 @@ def build_gateway(
     # The injection check's model call needs an Anthropic key, and is skipped in offline (mock) mode.
     if checker is None and settings.anthropic_key and not settings.mock:
         checker = AsyncAnthropic(api_key=settings.anthropic_key)
-    guard = Guard(settings, sessions or Sessions(), Vault(settings.state_dir / "gateway.db"), checker)
+    sessions = sessions or Sessions()
+    # Confidential text served and the user's consent answers, shared by the tools and the model proxy.
+    confidential = ConfidentialStore(settings.state_dir / "gateway.db")
+    guard = Guard(settings, sessions, Vault(settings.state_dir / "gateway.db"), checker, confidential)
 
     # Tool names use underscores: the Claude API rejects dots in tool names.
     # Tools are async so an approval wait does not block other calls.
@@ -69,7 +74,8 @@ def build_gateway(
     @mcp.tool(structured_output=False)
     async def files_read(path: str, ctx: Context) -> str:
         """Read a text or PDF file. `path` is "<folder>/<path inside it>", as files_list shows it.
-        Personal data comes back as placeholders like {{EMAIL_1}}: use them as they are."""
+        Personal data comes back as placeholders like {{EMAIL_1}}: use them as they are.
+        Text from a Confidential folder comes between <<confidential:...>> markers: keep them."""
         return await guard.run(ctx, "files_read", path, lambda run, target: files.read_file(target))
 
     @mcp.tool(structured_output=False)
@@ -152,7 +158,8 @@ def build_gateway(
         )
 
     # The model proxy shares the MCP server's HTTP app and port.
-    mcp.custom_route("/model/{path:path}", methods=["GET", "POST"])(make_model_route(settings, transport))
+    route = make_model_route(settings, transport, Consent(confidential), sessions)
+    mcp.custom_route("/model/{path:path}", methods=["GET", "POST"])(route)
     return mcp
 
 

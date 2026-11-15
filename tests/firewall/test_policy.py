@@ -1,6 +1,7 @@
 """Policy: one test per permission rule. Path rules are in test_files_tool.py."""
 
 from core.contracts.agents import AgentPermissions, FolderAccess
+from core.firewall.labels import Label
 from core.firewall.policy import decide
 from core.firewall.session import Session
 
@@ -57,3 +58,19 @@ def test_draft_is_allowed():
 def test_send_always_asks_even_in_a_fresh_session():
     decision = decide("gmail_send", MAIL, fresh(), None, "friend@example.com")
     assert (decision.kind, decision.rule_id) == ("ask", "send_needs_approval")
+
+
+def confidential() -> Session:
+    session = fresh()
+    session.raise_label(Label.CONFIDENTIAL)
+    return session
+
+
+def test_send_after_confidential_read_is_a_consent_question():
+    decision = decide("gmail_send", MAIL, confidential(), None, "friend@example.com")
+    assert (decision.kind, decision.rule_id, decision.ask) == ("ask", "send_with_confidential", "consent")
+
+
+def test_fetch_after_confidential_read_is_a_consent_question():
+    decision = decide("web_fetch", AgentPermissions(tools=["web_fetch"]), confidential(), None, "https://example.com")
+    assert (decision.kind, decision.rule_id, decision.ask) == ("ask", "fetch_with_confidential", "consent")

@@ -6,8 +6,11 @@ mock model or relays the request to the real provider with the real key.
 
 The provider follows from the API the agent speaks, which B's agent manager sets
 from the provider the user chose: OpenAI-style chat/completions goes to Gemini,
-Anthropic-style messages goes to Anthropic. The agent never picks a host.
-Step 3 adds the key tripwire and secret scan; Step 6 adds consent.
+Anthropic-style messages goes to Anthropic, and anything under /model/local goes
+to the local model (Ollama, OpenAI style). The agent never picks a host.
+Every request is scanned for keys and secrets. Requests to a cloud provider also go
+through consent for Confidential file text (core/proxy/consent.py); the local model
+skips it, because nothing leaves the machine.
 """
 
 import json
@@ -17,12 +20,17 @@ import httpx
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response, StreamingResponse
 
-from core.firewall import core_client, secrets
+from core.firewall import core_client, permissions, secrets
 from core.firewall.config import GatewaySettings
+from core.firewall.permissions import NoPermissions
+from core.firewall.session import Sessions
 from core.proxy import mock_model
+from core.proxy.consent import Consent
 
 Handler = Callable[[Request], Awaitable[Response]]
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+# Paths under this prefix go to the local model. B points an agent at http://gateway:8080/model/local.
+LOCAL_PREFIX = "local/"
 # Agent headers we pass on to the provider. Everything else, including the agent's key, is dropped.
 FORWARDED_HEADERS = ("anthropic-version", "anthropic-beta")
 # How much of a provider error to log, so a failed chat can be explained.
@@ -40,11 +48,21 @@ def upstream_for(path: str, settings: GatewaySettings) -> tuple[str, dict[str, s
 
     None for any other path: it is not a model call.
     """
+    if path.startswith(LOCAL_PREFIX):
+        # Ollama needs no key.
+        return (settings.ollama_url, {}) if path.endswith("chat/completions") else None
     if path.endswith("chat/completions"):
         return GEMINI_URL, {"authorization": f"Bearer {settings.gemini_key}"}
     if path.endswith("messages"):
         return f"https://api.anthropic.com/{path}", {"x-api-key": settings.anthropic_key}
     return None
+
+
+def provider_name(path: str) -> str:
+    """Who would get the request, in words for the consent question."""
+    if path.startswith(LOCAL_PREFIX):
+        return "the local model"
+    return "Gemini" if path.endswith("chat/completions") else "Anthropic"
 
 
 def has_real_key(headers: dict[str, str]) -> bool:
@@ -69,10 +87,17 @@ def sign_tool_calls(body: dict) -> dict:
     return body
 
 
-def make_model_route(settings: GatewaySettings, transport: httpx.AsyncBaseTransport | None = None) -> Handler:
+def make_model_route(
+    settings: GatewaySettings,
+    transport: httpx.AsyncBaseTransport | None = None,
+    consent: Consent | None = None,
+    sessions: Sessions | None = None,
+) -> Handler:
     """Build the route handler for these settings.
 
     transport: only for tests, to fake the provider.
+    consent, sessions: shared with the tools, so the proxy knows what Confidential text
+    files_read served in the agent's current session. Without them there is no consent step.
     """
 
     async def model_route(request: Request) -> Response:
@@ -104,10 +129,13 @@ def make_model_route(settings: GatewaySettings, transport: httpx.AsyncBaseTransp
         blocked = blocked_for_secrets(body, agent, path, settings)
         if blocked is not None:
             return blocked
+        local = path.startswith(LOCAL_PREFIX)
+        if not local and consent is not None and sessions is not None:
+            await withhold_denied(body, agent, key, path, consent, sessions, settings)
         if settings.mock:
             return mock_model.reply(path, body)
         url, headers = upstream
-        if not has_real_key(headers):
+        if not local and not has_real_key(headers):
             core_client.emit("model_blocked", agent=agent, path=path, reason="no real key for this provider")
             return JSONResponse({"error": "Heimdall: no real key for this provider"}, status_code=502)
         if path.endswith("chat/completions"):
@@ -116,6 +144,20 @@ def make_model_route(settings: GatewaySettings, transport: httpx.AsyncBaseTransp
         return await relay(url, headers, body, agent, transport)
 
     return model_route
+
+
+async def withhold_denied(
+    body: dict, agent: str, key: str, path: str, consent: Consent, sessions: Sessions, settings: GatewaySettings
+) -> None:
+    """Consent for Confidential text in this request; denied blocks are replaced in `body`."""
+    try:
+        run = permissions.load(settings.agents_dir, agent, key)
+    except NoPermissions:
+        return  # no permissions, no file tools: nothing Confidential can have been served
+    session = sessions.for_run(agent, run.run_id)
+    withheld = await consent.check(body, agent, session.id, provider_name(path))
+    if withheld:
+        core_client.emit("model_withheld", agent=agent, path=path, rule_id="consent_denied", files=withheld)
 
 
 def blocked_for_secrets(body: dict, agent: str, path: str, settings: GatewaySettings) -> Response | None:
