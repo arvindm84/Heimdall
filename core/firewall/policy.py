@@ -52,6 +52,12 @@ def decide(
         return Decision("allow", "files_write_allowed", f"folder {name} is writable")
     if tool == "gmail_read":
         return Decision("allow", "gmail_read_allowed", "reading mail is allowed; content is treated as untrusted")
+    if tool == "gmail_draft":
+        # A draft stays in the gateway with its placeholders; nothing leaves.
+        return Decision("allow", "gmail_draft_allowed", "drafts stay in the gateway with placeholders kept")
+    if tool == "gmail_send":
+        # Sending is the way out for personal data, so the user always sees the final email first.
+        return Decision("ask", "send_needs_approval", "sending email always needs the user's approval")
     if tool == "web_fetch":
         # A URL is a way out: a placeholder in it means personal data is on its way somewhere.
         # Placeholders are never filled in a URL, so refuse rather than send the token.

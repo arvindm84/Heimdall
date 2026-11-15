@@ -1,8 +1,8 @@
 """The guard every tool call goes through (complete mediation, deny by default).
 
 Order: identify the agent from its key -> load its permissions -> its session ->
-check the path -> policy.decide -> scan what it would send -> ask the user if the
-rule says so -> run the tool -> for content from outside: mark the session
+check the path -> policy.decide -> scan what it would send -> fill in placeholders
+(gmail_send only) -> ask the user if the rule says so -> run the tool -> for content from outside: mark the session
 untrusted and report hidden instructions -> swap personal data for placeholders ->
 wrap outside content in the session delimiter -> raise the session label -> emit
 exactly one tool_call event.
@@ -14,7 +14,7 @@ to the agent as an error result, so the agent can tell the user why.
 import inspect
 from collections import Counter
 from collections.abc import Callable
-from typing import NoReturn
+from typing import Any, NoReturn
 
 from mcp.server.fastmcp import Context
 
@@ -26,7 +26,7 @@ from core.firewall.sanitize import Evidence, Untrusted
 from core.firewall.session import Session, Sessions
 from core.firewall.tools import files
 from core.firewall.tools.files import Denied, Target
-from core.firewall.vault import Vault
+from core.firewall.vault import PLACEHOLDER, Vault
 
 # Tools whose path argument is a file path inside the user's folders.
 FILE_TOOLS = {"files_list", "files_read", "files_write"}
@@ -44,9 +44,10 @@ SPOTLIGHT = (
     "<<untrusted:{d}>>\n{text}\n<</untrusted:{d}>>"
 )
 
-# The tool's own work, run only after the call is allowed: (run, target or None) -> text for the
-# agent, or Untrusted for content from outside.
-Work = Callable[[AgentRun, Target | None], "str | Untrusted"]
+# The tool's own work, run only after the call is allowed: (run, prepared) -> text for the
+# agent, or Untrusted for content from outside. `prepared` is the resolved Target for file
+# tools, the filled-in fields for a call with `fill` (gmail_send), or None.
+Work = Callable[[AgentRun, Any], "str | Untrusted"]
 
 
 class Guard:
@@ -82,14 +83,17 @@ class Guard:
         work: Work,
         outbound: str = "",
         check: Callable[[], None] | None = None,
+        fill: dict[str, str] | None = None,
     ) -> str:
         """Run one tool call under the policy.
 
         path: the agent's path argument (None if the call has none).
-        outbound: text the call would send or store (a file's content, later a mail body or URL);
+        outbound: text the call would send or store (a file's content, a mail, a URL);
         it is scanned for keys and secrets before anything else happens with it.
         check: a tool's own up-front check (web_fetch: is the address public?). It raises
         Denied, and runs before the user could be asked: never ask about a call we'd refuse.
+        fill: fields whose placeholders get this session's real values (gmail_send). The user
+        is asked with the filled-in fields, the work gets them, the agent never sees them.
         """
         agent, key = self.identify(ctx, tool)
         try:
@@ -121,26 +125,30 @@ class Guard:
             found = ", ".join(f"{finding.kind} ({finding.preview})" for finding in findings)
             rule_id = "key_theft_attempt" if theft else "secret_in_tool_call"
             self.refuse(agent, tool, path, session, "deny", rule_id, f"contains {found}")
+        extra: dict = {}
+        filled = None
+        if fill is not None:
+            filled = self.fill_in(agent, tool, path, session, fill)
+            extra["filled"] = sum(len(PLACEHOLDER.findall(value)) for value in fill.values())
         outcome = "allow"
         if decision.kind == "ask":
-            if not await self.ask_user(agent, tool, path, decision):
-                self.refuse(agent, tool, path, session, "denied_by_user", decision.rule_id, decision.reason)
+            if not await self.ask_user(agent, tool, path, decision, filled):
+                self.refuse(agent, tool, path, session, "denied_by_user", decision.rule_id, decision.reason, **extra)
             outcome = "approved"
 
         try:
-            result = work(run, target)
+            result = work(run, filled if fill is not None else target)
             # Some tools (web_fetch) do their work asynchronously.
             if inspect.isawaitable(result):
                 result = await result
         except Denied as denied:
-            self.refuse(agent, tool, path, session, "deny", denied.rule_id, denied.reason)
-        extra: dict = {}
+            self.refuse(agent, tool, path, session, "deny", denied.rule_id, denied.reason, **extra)
         if isinstance(result, Untrusted):
             # Rule of Two: from now on, sends and writes in this session need the user.
             session.mark_untrusted()
             session.raise_label(OUTSIDE_LABELS.get(tool, Label.PUBLIC))
             flagged = self.report_hidden(agent, tool, result.evidence)
-            extra = {"hidden": dict(Counter(e.removed.kind for e in result.evidence)), "flagged": len(flagged)}
+            extra |= {"hidden": dict(Counter(e.removed.kind for e in result.evidence)), "flagged": len(flagged)}
         text = result.text if isinstance(result, Untrusted) else result
         counts: dict[str, int] = {}
         if tool in REDACTED_TOOLS:
@@ -176,11 +184,38 @@ class Guard:
             )
         return flagged
 
-    async def ask_user(self, agent: str, tool: str, path: str | None, decision: policy.Decision) -> bool:
-        """Ask through the core and wait. Anything but an explicit approve is a no."""
+    def fill_in(self, agent: str, tool: str, path: str | None, session: Session, fields: dict[str, str]) -> dict:
+        """The fields with this session's real values in place of placeholders.
+
+        A placeholder this session doesn't own (another run's, or made up) is refused
+        rather than sent as is: an injected "send {{SSN_1}}" must not reach another
+        run's data, and a raw placeholder in a sent email helps no one.
+        """
+        filled, unknown = {}, []
+        for name, value in fields.items():
+            filled[name], missing = self.vault.fill(value, session.id)
+            unknown += missing
+        if unknown:
+            reason = f"placeholders not from this session: {', '.join(sorted(set(unknown)))}"
+            self.refuse(agent, tool, path, session, "deny", "placeholder_not_in_session", reason)
+        return filled
+
+    async def ask_user(
+        self, agent: str, tool: str, path: str | None, decision: policy.Decision, filled: dict | None = None
+    ) -> bool:
+        """Ask through the core and wait. Anything but an explicit approve is a no.
+
+        filled: for gmail_send, the final email. The user approves exactly what will be
+        sent, with real values; this goes to the user's own back end, never into events.
+        """
         question = f"{agent} wants to use {tool} on {path}. Reason for asking: {decision.reason}."
+        details: dict = {"tool": tool, "path": path}
+        if filled is not None:
+            lines = "\n".join(f"{name.capitalize()}: {value}" for name, value in filled.items())
+            question = f"{agent} wants to use {tool}. Reason for asking: {decision.reason}.\n{lines}"
+            details = {"tool": tool, **filled}
         try:
-            answer = await core_client.ask("approval", agent, question, {"tool": tool, "path": path})
+            answer = await core_client.ask("approval", agent, question, details)
         except Exception:  # noqa: BLE001 - fail closed on any error while asking
             return False
         return answer == "approve"
@@ -217,8 +252,16 @@ class Guard:
         )
 
     def refuse(
-        self, agent: str, tool: str, path: str | None, session: Session | None, decision: str, rule_id: str, reason: str
+        self,
+        agent: str,
+        tool: str,
+        path: str | None,
+        session: Session | None,
+        decision: str,
+        rule_id: str,
+        reason: str,
+        **extra,
     ) -> NoReturn:
         """Record the refusal, then stop the call with a message the agent can pass on."""
-        self.record(agent, tool, path, session, decision, rule_id, reason)
+        self.record(agent, tool, path, session, decision, rule_id, reason, **extra)
         raise PermissionError(f"Heimdall refused {tool}: {reason} (rule {rule_id})")

@@ -44,3 +44,16 @@ def test_write_after_untrusted_content_asks():
     session.mark_untrusted()
     decision = decide("files_write", ALL_TOOLS, session, WRITABLE)
     assert (decision.kind, decision.rule_id) == ("ask", "write_after_untrusted")
+
+
+MAIL = AgentPermissions(tools=["gmail_draft", "gmail_send"])
+
+
+def test_draft_is_allowed():
+    decision = decide("gmail_draft", MAIL, fresh(), None, "friend@example.com")
+    assert (decision.kind, decision.rule_id) == ("allow", "gmail_draft_allowed")
+
+
+def test_send_always_asks_even_in_a_fresh_session():
+    decision = decide("gmail_send", MAIL, fresh(), None, "friend@example.com")
+    assert (decision.kind, decision.rule_id) == ("ask", "send_needs_approval")
