@@ -31,9 +31,12 @@ def test_local_model_goes_to_the_gateways_local_route():
     assert entry["apiKey"] == agent.FAKE_KEY
 
 
-def test_memory_and_delegation_are_refused():
-    with pytest.raises(ValueError):
-        agent.build_config(AgentPermissions(memory=True), "gemini", testing.MODEL)
+def test_memory_is_the_gateways_notes():
+    config = agent.build_config(AgentPermissions(tools=["files_read"], memory=True), "gemini", testing.MODEL)
+    assert config["tools"]["alsoAllow"] == ["heimdall__files_read", "heimdall__memory_read", "heimdall__memory_write"]
+
+
+def test_delegation_is_refused():
     with pytest.raises(ValueError):
         agent.build_config(AgentPermissions(delegation=True), "gemini", testing.MODEL)
 

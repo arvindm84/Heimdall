@@ -24,6 +24,7 @@ from core.firewall import core_client, injection, permissions, policy, secrets
 from core.firewall.confidential import ConfidentialStore
 from core.firewall.config import GatewaySettings
 from core.firewall.labels import Label, from_contract
+from core.firewall.memory import Note
 from core.firewall.permissions import AgentRun, NoPermissions
 from core.firewall.sanitize import Evidence, Untrusted
 from core.firewall.session import Session, Sessions
@@ -49,7 +50,8 @@ SPOTLIGHT = (
 
 # The tool's own work, run only after the call is allowed: (run, prepared) -> text for the
 # agent, or Untrusted for content from outside. `prepared` is the resolved Target for file
-# tools, the filled-in fields for a call with `fill` (gmail_send), or None.
+# tools, the filled-in fields for a call with `fill` (gmail_send), the Session for memory
+# tools, or None. memory_read's work returns a list of Notes, which the guard turns into text.
 Work = Callable[[AgentRun, Any], "str | Untrusted"]
 
 
@@ -152,8 +154,9 @@ class Guard:
                 self.refuse(agent, tool, path, session, "denied_by_user", decision.rule_id, decision.reason, **extra)
             outcome = "approved"
 
+        prepared = filled if fill is not None else session if tool in policy.MEMORY_TOOLS else target
         try:
-            result = work(run, filled if fill is not None else target)
+            result = work(run, prepared)
             # Some tools (web_fetch) do their work asynchronously.
             if inspect.isawaitable(result):
                 result = await result
@@ -168,6 +171,8 @@ class Guard:
             flagged = self.report_hidden(agent, tool, result.evidence)
             extra |= {"hidden": dict(Counter(e.removed.kind for e in result.evidence)), "flagged": len(flagged)}
         text = result.text if isinstance(result, Untrusted) else result
+        if tool == "memory_read":
+            text = self.serve_notes(session, result)
         counts: dict[str, int] = {}
         if tool in REDACTED_TOOLS:
             text, counts = self.vault.redact(text, session.id)
@@ -186,6 +191,23 @@ class Guard:
                 text = self.confidential.mark(session.id, file, text)
         self.record(agent, tool, path, session, outcome, decision.rule_id, decision.reason, counts, **extra)
         return text
+
+    def serve_notes(self, session: Session, notes: list[Note]) -> str:
+        """Notes as text for the agent. Like reading a file: each note raises the session to
+        its label, a note written after untrusted content makes the session untrusted, and
+        Confidential notes are marked so the model proxy asks before they go to a cloud model."""
+        if not notes:
+            return "No notes yet."
+        parts = []
+        for note in notes:
+            session.raise_label(note.label)
+            if note.untrusted:
+                session.mark_untrusted()
+            text = note.text
+            if note.label >= Label.CONFIDENTIAL and self.confidential is not None:
+                text = self.confidential.mark(session.id, f"memory/note-{note.id}", text)
+            parts.append(f"Note {note.id} ({note.label}, written {note.written}):\n{text}")
+        return "\n\n".join(parts)
 
     def report_hidden(self, agent: str, tool: str, evidence: list[Evidence]) -> list[Evidence]:
         """One hidden_instruction event per hidden piece that looks like an instruction.

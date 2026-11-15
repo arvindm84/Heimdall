@@ -29,7 +29,7 @@ def launch_agent(agent: str, config: dict) -> dict:
         folders     [{"path": "/abs/path", "label": "public" | "private" | "confidential", "write": false}]
         tools       any of files_list, files_read, files_write, gmail_read, gmail_draft, gmail_send, web_fetch
         skills      names of installed skills, OpenClaw only
-        memory      bool, Hermes only
+        memory      bool: labelled notes kept in the gateway (memory_read, memory_write)
         delegation  bool, Hermes only
         provider    "gemini" | "anthropic" | "local" (default "gemini")
         model       model name, or leave out for the provider's default

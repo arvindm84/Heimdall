@@ -9,6 +9,8 @@ export const TOOL_NAME: Record<string, string> = {
   gmail_draft: "Draft email",
   gmail_send: "Send email",
   web_fetch: "Open web pages",
+  memory_read: "Read notes",
+  memory_write: "Save notes",
   messages: "Talk to the AI model",
 };
 
@@ -21,5 +23,7 @@ export const TOOL_VERB: Record<string, string> = {
   gmail_draft: "draft an email to",
   gmail_send: "send an email to",
   web_fetch: "open",
+  memory_read: "read its notes",
+  memory_write: "save a note",
   messages: "send a message to",
 };
