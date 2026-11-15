@@ -8,11 +8,11 @@ import pytest
 from agents import manager
 from core.contracts.agents import OpenedAgent
 from backend.app import app
-from backend.services import agent_service
+from backend.services import agent_service, folder_service
 
 
 @pytest.fixture
-def calls(monkeypatch):
+def calls(monkeypatch, tmp_path):
     """Replace the manager's Docker functions and record how they were called."""
     recorded = []
 
@@ -25,6 +25,8 @@ def calls(monkeypatch):
     monkeypatch.setattr(manager, "stop_agent", lambda agent: recorded.append(("stop", agent)))
     monkeypatch.setattr(manager, "kill_agent", lambda agent: recorded.append(("kill", agent)))
     agent_service._opened.clear()
+    # No saved folder labels: launches here must not pick up the real ones under data/.
+    monkeypatch.setattr(folder_service, "AGENTS_DIR", tmp_path / "agents")
     return recorded
 
 

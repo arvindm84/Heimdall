@@ -1,5 +1,7 @@
 """Route tests for the folder-access popup: listing folders, and saving each agent's labels."""
 
+from pathlib import Path
+
 import pytest
 
 from backend.app import app
@@ -77,3 +79,109 @@ def test_bad_label_saves_get_a_400(client, home, body):
 
 def test_labels_for_an_unknown_agent_get_a_400(client, home):
     assert client.get("/api/folder-labels", query_string={"agent": "nobody"}).status_code == 400
+
+
+# Labels -> the folders an agent is granted at launch (folder_service.granted_folders).
+
+from agents import manager
+from backend.services import agent_service
+from core.contracts.agents import OpenedAgent
+
+
+def save(client, agent, labels):
+    assert client.post("/api/folder-labels", json={"agent": agent, "labels": labels}).status_code == 204
+
+
+def test_only_labelled_folders_are_granted_read_only(client, home):
+    save(client, "openclaw", {str(home / "Photos"): "private"})
+    assert folder_service.granted_folders("openclaw") == [
+        {"path": str((home / "Photos").resolve()), "label": "private", "write": False}
+    ]
+
+
+def test_agent_that_was_never_asked_gets_no_folders(home):
+    assert folder_service.granted_folders("hermes") == []
+
+
+def test_outer_folder_takes_the_strictest_label_inside_it(client, home):
+    # The firewall has one label per granted folder. Taxes is reachable through Documents,
+    # so Documents must carry Taxes's label, and Taxes isn't granted a second time.
+    save(client, "openclaw", {str(home / "Documents"): "private", str(home / "Documents" / "Taxes"): "confidential"})
+    assert folder_service.granted_folders("openclaw") == [
+        {"path": str((home / "Documents").resolve()), "label": "confidential", "write": False}
+    ]
+
+
+def test_weaker_label_inside_is_also_shared_by_itself_and_does_not_weaken_the_outer_folder(client, home):
+    save(client, "openclaw", {str(home / "Documents"): "confidential", str(home / "Documents" / "Taxes"): "public"})
+    assert folder_service.granted_folders("openclaw") == [
+        {"path": str((home / "Documents").resolve()), "label": "confidential", "write": False},
+        {"path": str((home / "Documents" / "Taxes").resolve()), "label": "public", "write": False},
+    ]
+
+
+def test_marking_only_a_subfolder_shares_nothing_else_in_its_parent(client, home):
+    save(client, "openclaw", {str(home / "Documents" / "Taxes"): "public"})
+    assert folder_service.granted_folders("openclaw") == [
+        {"path": str((home / "Documents" / "Taxes").resolve()), "label": "public", "write": False}
+    ]
+
+
+def test_three_levels_keep_the_strictest_label_on_every_way_in(client, home):
+    # Confidential Documents > Public Taxes > Private 2024: 2024 is reachable through Taxes,
+    # so Taxes is shared as Private (weaker than Documents, so still shared by itself).
+    (home / "Documents" / "Taxes" / "2024").mkdir()
+    save(client, "openclaw", {
+        str(home / "Documents"): "confidential",
+        str(home / "Documents" / "Taxes"): "public",
+        str(home / "Documents" / "Taxes" / "2024"): "private",
+    })
+    assert [(Path(f["path"]).name, f["label"]) for f in folder_service.granted_folders("openclaw")] == [
+        ("Documents", "confidential"),
+        ("Taxes", "private"),
+    ]
+
+
+def test_deleted_folder_is_left_out(client, home):
+    save(client, "openclaw", {str(home / "Photos"): "public", str(home / "Documents"): "private"})
+    (home / "Photos").rmdir()
+    assert [f["path"] for f in folder_service.granted_folders("openclaw")] == [str((home / "Documents").resolve())]
+
+
+@pytest.mark.parametrize("outside", ["/etc", "..", "Library/Mail"])
+def test_labels_outside_home_are_refused(client, home, outside):
+    path = outside if outside.startswith("/") else str(home / outside)
+    response = client.post("/api/folder-labels", json={"agent": "openclaw", "labels": {path: "public"}})
+    assert response.status_code == 400
+    assert folder_service.get_labels("openclaw") is None
+
+
+@pytest.fixture
+def opened(monkeypatch):
+    """Fake manager.open_agent that records the permissions each agent was opened with."""
+    seen = {}
+
+    def open_agent(agent, permissions, provider="gemini", model=None):
+        seen[agent] = permissions
+        return OpenedAgent(agent=agent, chat_url="http://127.0.0.1:7681/", chat_user="heimdall", chat_token="t")
+
+    monkeypatch.setattr(manager, "open_agent", open_agent)
+    monkeypatch.setattr(agent_service.key_service, "put_in_environment", lambda: None)
+    return seen
+
+
+def test_launch_gives_each_agent_its_own_folders(client, home, opened):
+    save(client, "openclaw", {str(home / "Photos"): "public"})
+    save(client, "hermes", {str(home / "Documents"): "confidential"})
+
+    for agent in ("openclaw", "hermes"):
+        assert client.post("/api/launch", json={"agent": agent, "config": {"tools": ["files_read"]}}).status_code == 201
+
+    assert [(f.path, f.label) for f in opened["openclaw"].folders] == [(str((home / "Photos").resolve()), "public")]
+    assert [(f.path, f.label) for f in opened["hermes"].folders] == [(str((home / "Documents").resolve()), "confidential")]
+
+
+def test_folders_in_the_launch_request_win_over_saved_labels(client, home, opened):
+    save(client, "openclaw", {str(home / "Photos"): "public"})
+    client.post("/api/launch", json={"agent": "openclaw", "config": {"folders": []}})
+    assert opened["openclaw"].folders == []

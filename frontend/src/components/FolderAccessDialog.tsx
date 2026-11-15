@@ -20,8 +20,10 @@ type Props = {
 };
 
 // The popup before an agent's first start: a folder tree with one label per folder.
-// Only folders the user clicks go into `labels`. Any other folder shows its parent's label
-// (dimmed), so changing a parent changes every subfolder the user hasn't set.
+// Only folders the user clicks go into `labels`, and only those are shared with the agent
+// (backend/services/folder_service.py, granted_folders). Any other folder shows its parent's
+// label (dimmed), or Confidential at the top level, so changing a parent changes every
+// subfolder the user hasn't set.
 export default function FolderAccessDialog({ agentName, initial, saveText, onSave, onCancel }: Props) {
   const [labels, setLabels] = useState<FolderLabels>(initial);
   const [home, setHome] = useState<string | null>(null);
@@ -100,8 +102,15 @@ export default function FolderAccessDialog({ agentName, initial, saveText, onSav
                 name={folder.path}
                 checked={label === c.label}
                 inherited={!chosen}
-                title={`${folder.name}: ${c.name}`}
-                onChange={() => setLabels((all) => ({ ...all, [folder.path]: c.label }))}
+                title={chosen === c.label ? `${folder.name}: click again to stop sharing it` : `${folder.name}: ${c.name}`}
+                // Click a label to mark the folder (share it). Click the marked one again to un-mark it.
+                onPick={() =>
+                  setLabels((all) => {
+                    if (all[folder.path] !== c.label) return { ...all, [folder.path]: c.label };
+                    const { [folder.path]: _removed, ...rest } = all;
+                    return rest;
+                  })
+                }
               />
             ))}
           </div>
@@ -130,8 +139,9 @@ export default function FolderAccessDialog({ agentName, initial, saveText, onSav
         <div className="px-6 pt-5 pb-4">
           <h2 className="text-xl font-bold">Folder access for {agentName}</h2>
           <p className="mt-1 max-w-[60ch] text-sm text-lichen">
-            Mark how sensitive each folder is. Everything starts as public. Subfolders follow their parent unless you
-            change them. You only do this once; change it later from Folder access.
+            Only folders you mark are shared with {agentName}. Everything else starts as Confidential and stays hidden
+            from it. Subfolders follow their parent unless you change them, so to share one subfolder only, mark just
+            that subfolder. Click a mark again to remove it. Change this later from Folder access; it applies the next time the agent starts.
           </p>
         </div>
 
@@ -147,7 +157,7 @@ export default function FolderAccessDialog({ agentName, initial, saveText, onSav
         </div>
 
         <div className="min-h-40 flex-1 overflow-y-auto px-6">
-          {home ? rows(home, 0, "public") : !saveError && <p className="py-4 text-sm text-lichen">Loading folders…</p>}
+          {home ? rows(home, 0, "confidential") : !saveError && <p className="py-4 text-sm text-lichen">Loading folders…</p>}
         </div>
 
         <div className="flex items-center justify-end gap-2 border-t border-rule px-6 py-4">
@@ -173,10 +183,11 @@ export default function FolderAccessDialog({ agentName, initial, saveText, onSav
 
 // A square box that works like a radio button: one per folder can be checked.
 // Dimmed when the folder hasn't been set and is only following its parent.
-function LabelBox(props: { name: string; checked: boolean; inherited: boolean; title: string; onChange: () => void }) {
+function LabelBox(props: { name: string; checked: boolean; inherited: boolean; title: string; onPick: () => void }) {
   return (
     <label className="flex cursor-pointer justify-center py-1" title={props.title}>
-      <input type="radio" name={props.name} checked={props.checked} onChange={props.onChange} className="peer sr-only" />
+      {/* onClick, not onChange: a radio that is already checked fires no change, and we need that click to un-mark. */}
+      <input type="radio" name={props.name} checked={props.checked} onChange={() => {}} onClick={props.onPick} className="peer sr-only" />
       <span
         className={`flex size-[18px] items-center justify-center rounded-[3px] border transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-paper/60 ${
           props.checked

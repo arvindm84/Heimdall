@@ -17,7 +17,8 @@ export type LaunchConfig = {
 // Folder access, from the popup before an agent's first start.
 export type Label = "public" | "private" | "confidential";
 export type Folder = { name: string; path: string };
-// Only the folders the user clicked. Others take their nearest clicked parent's label, else public.
+// Only the folders the user clicked: these are the ones shared with the agent.
+// Others show their nearest clicked parent's label, else confidential, and are not shared by themselves.
 export type FolderLabels = Record<string, Label>;
 
 type AgentsResponse = {
