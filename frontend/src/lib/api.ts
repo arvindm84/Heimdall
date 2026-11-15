@@ -10,7 +10,7 @@ export type LaunchConfig = {
   skills?: string[]; // OpenClaw only
   memory?: boolean; // Hermes only
   delegation?: boolean; // Hermes only
-  provider?: "gemini" | "anthropic";
+  provider?: "gemini" | "anthropic" | "local";
   model?: string;
 };
 

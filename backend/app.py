@@ -141,7 +141,7 @@ def launch():
     #   skills      names of installed skills (OpenClaw only)
     #   memory      bool (Hermes only)
     #   delegation  bool (Hermes only)
-    #   provider    "gemini" | "anthropic"
+    #   provider    "gemini" | "anthropic" | "local" (Ollama on this computer, no key)
     #   model       model name; leave out for the provider's default
     # Returns: {"agent", "chat_url", "chat_user", "chat_token"}
     # Slow: answers once the agent's chat is up. Calling it again for a running

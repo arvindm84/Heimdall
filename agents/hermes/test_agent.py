@@ -23,6 +23,17 @@ def test_config_names_the_provider_and_sends_only_the_fake_key():
     assert config["telemetry"]["shared_metrics"] == {"enabled": False, "send": False, "offer_version": 2}
 
 
+def test_local_model_is_an_openai_style_endpoint_on_the_gateway():
+    model = manager.PROVIDERS["local"]
+    config = agent.build_config(AgentPermissions(), "local", model)
+    assert config["model"] == {
+        "default": model,
+        "provider": "custom",
+        "base_url": "http://gateway:8080/model/local",
+        "api_key": agent.FAKE_KEY,
+    }
+
+
 def test_memory_and_delegation_are_added_when_permitted():
     config = agent.build_config(AgentPermissions(memory=True, delegation=True), "gemini", testing.MODEL)
     assert config["platform_toolsets"]["cli"] == ["memory", "delegation"]

@@ -23,6 +23,14 @@ def test_config_calls_the_gateway_with_only_the_fake_key():
     assert server["headers"]["Authorization"] == f"Bearer {agent.FAKE_KEY}"
 
 
+def test_local_model_goes_to_the_gateways_local_route():
+    config = agent.build_config(AgentPermissions(), "local", manager.PROVIDERS["local"])
+    entry = config["models"]["providers"]["heimdall"]
+    assert entry["baseUrl"] == "http://gateway:8080/model/local"
+    assert entry["api"] == "openai-completions"
+    assert entry["apiKey"] == agent.FAKE_KEY
+
+
 def test_memory_and_delegation_are_refused():
     with pytest.raises(ValueError):
         agent.build_config(AgentPermissions(memory=True), "gemini", testing.MODEL)

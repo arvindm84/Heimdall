@@ -20,8 +20,8 @@ AGENTS_DIR = ROOT / "data" / "agents"
 FOLDER_MOUNTS = ROOT / "data" / "gateway" / "compose.folders.yaml"
 CHAT_USER = "heimdall"
 AGENTS = ("openclaw", "hermes")
-# provider -> default model
-PROVIDERS = {"gemini": "gemini-flash-lite-latest", "anthropic": "claude-haiku-4-5"}
+# provider -> default model. "local" is Ollama on this computer; it needs `ollama pull llama3.2:3b`.
+PROVIDERS = {"gemini": "gemini-flash-lite-latest", "anthropic": "claude-haiku-4-5", "local": "llama3.2:3b"}
 
 
 def profile(agent: str):

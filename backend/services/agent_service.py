@@ -31,7 +31,7 @@ def launch_agent(agent: str, config: dict) -> dict:
         skills      names of installed skills, OpenClaw only
         memory      bool, Hermes only
         delegation  bool, Hermes only
-        provider    "gemini" | "anthropic" (default "gemini")
+        provider    "gemini" | "anthropic" | "local" (default "gemini")
         model       model name, or leave out for the provider's default
 
     Returns {"agent", "chat_url", "chat_user", "chat_token"}.
