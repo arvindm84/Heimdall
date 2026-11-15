@@ -6,7 +6,11 @@ dependencies = ["pydantic>=2"]
 
 [dependency-groups]
 dev = ["pytest>=8"]
-gateway = ["httpx>=0.28.1", "mcp==1.30.0"]
+gateway = [
+    "httpx>=0.28.1",
+    "mcp==1.30.0",
+    "pypdf>=7.1.0",
+]
 
 [tool.uv]
 default-groups = ["dev", "gateway"]
