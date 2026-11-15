@@ -126,24 +126,34 @@ Branch: `firewall-placeholder-vault`
 
 ## Step 3: model proxy (about 1.5 h)
 
-Branch: `firewall/model-proxy`
+Branch: `firewall-model-proxy`
 
-**Tests first** (Starlette `TestClient` against the gateway app; upstreams faked with `httpx.MockTransport`):
-- `test_model_route_provider.py`: each agent's request goes to its own provider's URL with the real key and the chosen model; Ollama at `host.docker.internal:11434` when it is the agent's provider; the agent's own `model` field cannot pick another provider.
-- `test_model_route_keys.py`: the fake key is swapped for the real one; the fake key anywhere in the body is blocked with `key_theft_attempt`; an unknown fake key gets 401.
-- `test_secrets.py`: catches Anthropic, OpenAI, GitHub and AWS key formats, the gateway's real keys by exact match, and `.env`-shaped text (three or more `NAME=value` lines); does not flag ordinary prose or a UUID.
-- Seam test, with B: `tests/seams/test_agent_gateway.py::test_model_call_reaches_mock_with_real_key` (mock upstream, OpenClaw container).
+**Already done before this step:** the `/model` route identifies the agent by its fake key (401 if unknown). It sends `chat/completions` to Gemini and `messages` to Anthropic, swapping the fake key for the real one and streaming the reply. B's Docker tests check the real-key forwarding for both agents.
+
+**Tests first:**
+- `test_secrets.py`: catches Anthropic, OpenAI, GitHub, AWS and Google key formats, the gateway's real keys by exact match, any `sk-fake-...` key, and `.env`-shaped text (three or more `NAME=value` lines). It flags a random-looking value under a secret-sounding name (`STRIPE_SECRET=...`). It does not flag ordinary prose, a UUID, `API_KEY=changeme`, two settings lines, or placeholders. Previews never show the whole secret.
+- `test_model_tripwire.py`: a model request carrying a fake key is a 403 with `key_theft_attempt`. One carrying the gateway's real key or a `.env` is a 403 with `secret_in_request`. A blocked request never reaches the provider, the event names the agent and lists masked findings only, the agent's own key in the auth header is fine, and mock mode blocks too.
+- `test_guard.py`: `files_write` carrying a fake key or a `.env` is refused (`key_theft_attempt`, `secret_in_tool_call`) and nothing is written.
+- Seam test: from inside the OpenClaw container, a model request with the fake key or a `.env` gets 403, and a clean one gets 200 through Gemini.
 
 **Build:**
-1. `core/firewall/secrets.py`: format regexes, real-key match, fake-key match, `.env` shape. Entropy check only on the value side of `NAME=value`.
-2. `core/proxy/model_request.py`: read and rewrite Anthropic `messages` and OpenAI `chat/completions` bodies: list tool-result blocks, replace a block's content.
-3. `core/proxy/model_route.py`: identify agent, then fake-key tripwire, then secret scan, then key swap and relay. Blocks return 403 with a short reason in the body so the agent sees why.
-4. Run the same secret scan and fake-key tripwire on `web_fetch`, `gmail_send` and `files_write` arguments in the guard (that is where scene 4's key can leave now).
+1. `core/firewall/secrets.py`: `scan(text, real_keys, fake_keys)` and `scan_json(body, ...)`, which scans each decoded string so escaped newlines count as lines. The checks are exact matches, format regexes, the `.env` shape, and entropy only on the value side of a `NAME=value` line whose name says secret. Overlaps keep the most specific finding. Findings carry a masked preview (first 6 and last 4 characters).
+2. `core/proxy/model_route.py`: after `model_call` and before mock or relay, scan the body; on any finding, return 403 and emit `model_blocked` with `rule_id` and findings. It blocks rather than strips, so the user sees the attempt.
+3. `core/firewall/guard.py`: `run(..., outbound=...)` scans the path and the text a call would send or store, after the policy allows the tool and before any approval question. `files_write` passes its text; `gmail_send` and `web_fetch` will pass theirs in Steps 4 and 5.
+
+**Deferred, with reasons:**
+- `model_request.py` (rewriting tool-result blocks): only consent needs it, so it moves to Step 6.
+- Ollama: waits for the local-model scene.
+- Checking the agent's `model` field: `permissions.json` doesn't record the user's model choice, so the agent's model name still passes through. The provider can't be changed, because it follows the API path.
 
 **Done when:** an agent's model call works through the gateway with only a fake key, and a model request or tool call carrying a fake `.env` or the fake key is blocked and flagged.
 
+**Result (Nov 15):** done. The full suite passes: 180 tests, plus 1 symlink test skipped on Windows. From inside the real OpenClaw container, a model request with its fake key or a `.env` gets 403 and a clean one gets 200 through Gemini. B's tests for OpenClaw and Hermes pass with the scanner on, so real agent traffic causes no false blocks. No secret appears in the gateway logs.
+
+**Known limit:** a blocked request stays in the agent's chat history, so that conversation keeps being blocked until the user starts a new chat. This is deliberate for now: the user sees the attempt.
+
 **Issues to file:**
-- B and D: scene 4 now that agents have no internet. A raw `curl` to the attacker fails with no event. Options: show the tripwire on a gateway tool, or add a small egress logger on `gateway:8081` that refuses every `CONNECT` and logs the host (needs `HTTPS_PROXY` in agent images, no certificate).
+- B and D: scene 4 now that agents have no internet. A raw `curl` to the attacker fails with no event. The tripwire fires when the key goes out through the model or a gateway tool. If the demo needs a visible "blocked" moment for raw network calls, add a small egress logger on `gateway:8081` that refuses every `CONNECT` and logs the host (needs `HTTPS_PROXY` in agent images, no certificate).
 
 ## Step 4: sanitizer, injection flag, Gmail read, web fetch (about 1.5 h)
 
