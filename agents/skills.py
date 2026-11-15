@@ -65,8 +65,32 @@ def installed(agent: str) -> list[str]:
     return sorted(p.name for p in folder.iterdir() if p.is_dir()) if folder.exists() else []
 
 
+def quarantined() -> list[dict]:
+    """Every skill in quarantine with the scan findings that put it there."""
+    if not QUARANTINE.exists():
+        return []
+    return [
+        {"name": p.name, "status": "quarantined", "findings": scan(p)}
+        for p in sorted(QUARANTINE.iterdir())
+        if p.is_dir()
+    ]
+
+
+def sync_defaults(agent: str = "openclaw") -> list[dict]:
+    """Scan all bundled demo skills for `agent` if none have been installed yet."""
+    demo_dir = Path(__file__).resolve().parent / agent / "demo-skills"
+    if not demo_dir.is_dir():
+        return []
+    results = []
+    for folder in sorted(p for p in demo_dir.iterdir() if p.is_dir() and (p / "SKILL.md").is_file()):
+        if not (SKILLS_DIR / agent / folder.name).exists() and not (QUARANTINE / folder.name).exists():
+            results.append(install(agent, folder))
+    return results
+
+
 def stage(agent: str, names: list[str]) -> Path:
     """Fresh folder holding only the allowed, installed skills; mounted read only into the agent."""
+    sync_defaults(agent)
     missing = [name for name in names if name not in installed(agent)]
     if missing:
         raise ValueError(f"skills not installed (or quarantined): {', '.join(missing)}")
@@ -76,3 +100,4 @@ def stage(agent: str, names: list[str]) -> Path:
     for name in names:
         shutil.copytree(SKILLS_DIR / agent / name, staged / name)
     return staged
+

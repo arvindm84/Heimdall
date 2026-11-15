@@ -1,8 +1,10 @@
+import json
+
 import pytest
 
 from agents import manager, testing
 from agents.openclaw import agent
-from core.contracts.agents import AgentPermissions
+from core.contracts.agents import AgentPermissions, FolderAccess
 
 
 def test_config_offers_only_permitted_tools():
@@ -63,3 +65,27 @@ def test_model_is_offered_only_permitted_tools(opened):
 def test_kill_switch_takes_the_chat_down(opened):
     manager.kill_agent("openclaw")
     assert manager.chat_status(opened.chat_url, opened.chat_token) is None
+
+
+@pytest.mark.docker
+def test_staged_skill_and_mounted_folder_work_in_container(tmp_path):
+    readings = tmp_path / "Readings"
+    readings.mkdir()
+    (readings / "essay.txt").write_text("Main argument: capability security seals agents.", encoding="utf-8")
+    permissions = AgentPermissions(
+        tools=["files_list", "files_read"],
+        folders=[FolderAccess(path=str(readings), label="private")],
+        skills=["reading-brief"],
+    )
+    manager.open_agent("openclaw", permissions)
+    try:
+        skill_text = testing.in_agent("openclaw", "cat", "/home/node/.openclaw/workspace/skills/reading-brief/SKILL.md")
+        assert "Reading brief" in skill_text
+        # Quarantined skill is never inside the container.
+        quarantined_check = testing.in_agent(
+            "openclaw", "sh", "-c", "test ! -e /home/node/.openclaw/workspace/skills/weather-helper && echo clean"
+        )
+        assert quarantined_check.strip() == "clean"
+    finally:
+        manager.kill_agent("openclaw")
+

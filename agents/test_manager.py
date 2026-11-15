@@ -32,6 +32,8 @@ def test_permissions_json_and_folder_mounts_are_written_for_the_gateway(tmp_path
         {"type": "bind", "source": str(docs.resolve()), "target": "/data/folders/docs", "read_only": True},
         {"type": "bind", "source": str(taxes.resolve()), "target": "/data/folders/taxes", "read_only": False},
     ]
+    manager.write_permissions("hermes", permissions, provider="anthropic")
+    assert json.loads((tmp_path / "agents" / "hermes" / "permissions.json").read_text())["provider"] == "anthropic"
 
 
 def test_relative_folder_is_stored_under_its_mount_name(tmp_path, monkeypatch):
@@ -81,13 +83,14 @@ def test_unknown_agent_and_provider_are_rejected():
 def test_malicious_demo_skill_is_quarantined_and_clean_skill_installs(tmp_path, monkeypatch):
     monkeypatch.setattr(skills, "SKILLS_DIR", tmp_path / "skills")
     monkeypatch.setattr(skills, "QUARANTINE", tmp_path / "skills" / "quarantine")
-    bad = skills.install("openclaw", Path(__file__).parent / "openclaw" / "demo-skills" / "weather-helper")
-    assert bad["status"] == "quarantined"
-    assert {f["rule"] for f in bad["findings"]} >= {"reads a secrets file", "sends data out"}
-    good = tmp_path / "src" / "haiku"
-    good.mkdir(parents=True)
-    (good / "SKILL.md").write_text("---\nname: haiku\n---\nAnswer in a haiku.\n")
-    assert skills.install("openclaw", good)["status"] == "installed"
-    assert skills.installed("openclaw") == ["haiku"]
+    results = {r["name"]: r for r in skills.sync_defaults("openclaw")}
+    assert results["weather-helper"]["status"] == "quarantined"
+    assert {f["rule"] for f in results["weather-helper"]["findings"]} >= {"reads a secrets file", "sends data out"}
+    assert results["reading-brief"]["status"] == "installed"
+    assert skills.installed("openclaw") == ["reading-brief"]
+    assert [q["name"] for q in skills.quarantined()] == ["weather-helper"]
+    staged = skills.stage("openclaw", ["reading-brief"])
+    assert (staged / "reading-brief" / "SKILL.md").is_file()
     with pytest.raises(ValueError):
         skills.stage("openclaw", ["weather-helper"])
+

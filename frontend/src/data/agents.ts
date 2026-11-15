@@ -24,12 +24,12 @@ export const AGENT_PROFILES: AgentProfile[] = [
     id: "openclaw",
     name: "OpenClaw",
     description: "General-purpose assistant with skills and MCP tools.",
-    config: { tools: ["files_read", "files_list"], provider: "gemini" },
+     config: { tools: ["files_list", "files_read", "files_write", "gmail_read", "gmail_draft", "gmail_send", "web_fetch"], provider: "gemini" },
   },
   {
     id: "hermes",
     name: "Hermes",
     description: "Assistant from Nous Research that can keep memory between chats.",
-    config: { tools: ["files_read", "files_list"], provider: "gemini" },
+     config: { tools: ["files_list", "files_read", "files_write", "gmail_read", "gmail_draft", "gmail_send", "web_fetch"], provider: "gemini" },
   },
 ];

@@ -20,6 +20,7 @@ AGENTS_DIR = ROOT / "data" / "agents"
 FOLDER_MOUNTS = ROOT / "data" / "gateway" / "compose.folders.yaml"
 CHAT_USER = "heimdall"
 AGENTS = ("openclaw", "hermes")
+TOOLS = ("files_list", "files_read", "files_write", "gmail_read", "gmail_draft", "gmail_send", "web_fetch")
 # provider -> default model. "local" is Ollama on this computer; it needs `ollama pull llama3.2:3b`.
 PROVIDERS = {"gemini": "gemini-flash-lite-latest", "anthropic": "claude-haiku-4-5", "local": "llama3.2:3b"}
 
@@ -119,6 +120,11 @@ def open_agent(
 
 def stop_agent(agent: str) -> None:
     profile(agent)
+    if agent == "hermes":
+        try:
+            memory("hermes", "snapshot")
+        except subprocess.CalledProcessError:
+            pass
     compose("stop", agent, f"{agent}-ui")
 
 
@@ -129,7 +135,7 @@ def kill_agent(agent: str) -> None:
 
 
 def memory(agent: str, *args: str) -> str:
-    """Hermes memory snapshots: memory(agent, "list" | "snapshot" | "rollback", [id])."""
+    """Hermes memory snapshots: memory(agent, "list" | "show" | "snapshot" | "rollback", [id])."""
     if agent != "hermes":
         raise ValueError(f"{agent} has no memory")
     return compose("exec", "-T", agent, "heimdall-memory", *args)
