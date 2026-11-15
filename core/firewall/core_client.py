@@ -10,6 +10,8 @@ can capture events by patching this module.
 
 import json
 import os
+import queue
+import threading
 
 import httpx
 
@@ -21,12 +23,46 @@ ASK_TIMEOUT_SECONDS = 125
 
 
 def emit(kind: str, **fields) -> None:
-    """Print one event as a JSON line on stdout.
+    """Print one event as a JSON line on stdout, and send it to the dashboard if set up.
 
-    `docker compose logs gateway` and B's runtime tests read these lines. Once C
-    has an endpoint for plain events, this also posts there.
+    `docker compose logs gateway` and B's runtime tests read the stdout lines. With
+    HEIMDALL_EVENTS_URL set (C's endpoint for plain events), each event is also posted
+    there in the background: a slow or missing back end never holds up a tool call.
     """
-    print(json.dumps({"kind": kind, **fields}), flush=True)
+    event = {"kind": kind, **fields}
+    print(json.dumps(event), flush=True)
+    if EVENTS_URL:
+        _outgoing().put(event)
+
+
+# The dashboard's endpoint for plain events (POST one JSON event). Empty: stdout only.
+EVENTS_URL = os.environ.get("HEIMDALL_EVENTS_URL", "")
+EVENTS_TIMEOUT_SECONDS = 2
+# Only for tests, to fake the dashboard.
+events_transport: httpx.BaseTransport | None = None
+_queue: queue.Queue | None = None
+
+
+def _outgoing() -> queue.Queue:
+    """The queue of events waiting to be posted, with its sender thread started on first use."""
+    global _queue
+    if _queue is None:
+        _queue = queue.Queue()
+        threading.Thread(target=_send_events, args=(_queue,), daemon=True).start()
+    return _queue
+
+
+def _send_events(pending: queue.Queue) -> None:
+    """Post events one by one, in order. A failed post is dropped: stdout keeps the record."""
+    with httpx.Client(timeout=EVENTS_TIMEOUT_SECONDS, transport=events_transport) as client:
+        while True:
+            event = pending.get()
+            try:
+                client.post(EVENTS_URL, json=event)
+            except httpx.HTTPError:
+                pass
+            finally:
+                pending.task_done()
 
 
 async def ask(
