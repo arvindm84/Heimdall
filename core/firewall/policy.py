@@ -24,6 +24,11 @@ class Decision:
     kind: Literal["allow", "ask", "deny"]
     rule_id: str
     reason: str
+    # What kind of question an "ask" is: approve this action, or consent to Confidential data leaving.
+    ask: Literal["approval", "consent"] = "approval"
+
+
+CONFIDENTIAL_REASON = "this session has read Confidential files"
 
 
 def decide(
@@ -57,12 +62,18 @@ def decide(
         return Decision("allow", "gmail_draft_allowed", "drafts stay in the gateway with placeholders kept")
     if tool == "gmail_send":
         # Sending is the way out for personal data, so the user always sees the final email first.
+        # After a Confidential read, the same question is a consent: Confidential data may be in it.
+        if session.label >= Label.CONFIDENTIAL:
+            return Decision("ask", "send_with_confidential", CONFIDENTIAL_REASON, ask="consent")
         return Decision("ask", "send_needs_approval", "sending email always needs the user's approval")
     if tool == "web_fetch":
         # A URL is a way out: a placeholder in it means personal data is on its way somewhere.
         # Placeholders are never filled in a URL, so refuse rather than send the token.
         if PLACEHOLDER.search(outbound):
             return Decision("deny", "placeholder_in_url", "the URL carries a placeholder for personal data")
+        # A URL can carry data out: after a Confidential read, that needs the user's consent.
+        if session.label >= Label.CONFIDENTIAL:
+            return Decision("ask", "fetch_with_confidential", CONFIDENTIAL_REASON, ask="consent")
         # Rule of Two: untrusted input or private data, plus a way out, needs the user.
         if session.untrusted:
             return Decision("ask", "fetch_after_untrusted", "this session has read untrusted content")

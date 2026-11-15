@@ -4,7 +4,8 @@ Order: identify the agent from its key -> load its permissions -> its session ->
 check the path -> policy.decide -> scan what it would send -> fill in placeholders
 (gmail_send only) -> ask the user if the rule says so -> run the tool -> for content from outside: mark the session
 untrusted and report hidden instructions -> swap personal data for placeholders ->
-wrap outside content in the session delimiter -> raise the session label -> emit
+wrap outside content in the session delimiter -> raise the session label -> mark
+Confidential file text for the model proxy -> emit
 exactly one tool_call event.
 
 Any denial raises PermissionError with the rule and reason, which FastMCP returns
@@ -19,6 +20,7 @@ from typing import Any, NoReturn
 from mcp.server.fastmcp import Context
 
 from core.firewall import core_client, injection, permissions, policy, secrets
+from core.firewall.confidential import ConfidentialStore
 from core.firewall.config import GatewaySettings
 from core.firewall.labels import Label, from_contract
 from core.firewall.permissions import AgentRun, NoPermissions
@@ -51,12 +53,22 @@ Work = Callable[[AgentRun, Any], "str | Untrusted"]
 
 
 class Guard:
-    def __init__(self, settings: GatewaySettings, sessions: Sessions, vault: Vault, checker=None):
-        """checker: the client for the model's second opinion (anthropic.AsyncAnthropic), or None."""
+    def __init__(
+        self,
+        settings: GatewaySettings,
+        sessions: Sessions,
+        vault: Vault,
+        checker=None,
+        confidential: ConfidentialStore | None = None,
+    ):
+        """checker: the client for the model's second opinion (anthropic.AsyncAnthropic), or None.
+        confidential: where Confidential text served to the agent is recorded for the model proxy.
+        """
         self.settings = settings
         self.sessions = sessions
         self.vault = vault
         self.checker = checker
+        self.confidential = confidential
 
     def identify(self, ctx: Context, tool: str) -> tuple[str, str]:
         """(agent, key) from the bearer key on this MCP call.
@@ -161,6 +173,9 @@ class Guard:
         # Reading a file raises the label to the folder's: the session now holds data at that level.
         if tool == "files_read" and target is not None:
             session.raise_label(from_contract(target.access.label))
+            # Mark Confidential text so the model proxy can ask before it goes to a cloud model.
+            if target.access.label == "confidential" and self.confidential is not None:
+                text = self.confidential.mark(session.id, path, text)
         self.record(agent, tool, path, session, outcome, decision.rule_id, decision.reason, counts, **extra)
         return text
 
@@ -215,7 +230,7 @@ class Guard:
             question = f"{agent} wants to use {tool}. Reason for asking: {decision.reason}.\n{lines}"
             details = {"tool": tool, **filled}
         try:
-            answer = await core_client.ask("approval", agent, question, details)
+            answer = await core_client.ask(decision.ask, agent, question, details)
         except Exception:  # noqa: BLE001 - fail closed on any error while asking
             return False
         return answer == "approve"
