@@ -5,6 +5,11 @@ networks:
     internal: true
   outside: {}
 
+volumes:
+  # The placeholder vault (real personal data). Survives rebuilds and recreates;
+  # only `docker compose down -v` removes it. Mounted into the gateway, never into agents.
+  gateway-state: {}
+
 services:
   gateway:
     # A's gateway (core/gateway.py): MCP tools at /mcp and the model proxy at /model on 8080.
@@ -20,3 +25,4 @@ services:
       # Each agent's permissions.json. User folders are added by the agent manager
       # (data/gateway/compose.folders.yaml) at /data/folders/<name>.
       - ../../data/agents:/config/agents:ro
+      - gateway-state:/state

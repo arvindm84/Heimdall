@@ -25,6 +25,10 @@ What changed for you with the real gateway:
 - Done on the firewall side: `write_permissions` in `agents/manager.py` now stores each folder's resolved path, whose last part is the mount name the gateway looks for. Before, a path typed as `.` or `~/docs` couldn't be matched. `agents/test_manager.py` has a test for it, and the existing assertion now expects the resolved path.
 - New seam test `tests/seams/test_agent_gateway.py` (ours together): it opens OpenClaw with a made-up folder and checks reads, listings and refusals through the real containers.
 
+## Gateway state volume
+
+- Done on the firewall side: `agents/gateway/compose.yaml` now has a named volume, `gateway-state`, mounted at `/state` in the gateway only. It holds the placeholder vault, which has real personal data, so never mount it into an agent. `docker compose down -v` wipes it.
+
 ## Later
 
 - Firewall Step 4 (Gmail): mount `data/credentials.json` and `data/token.json` read-only into the gateway.

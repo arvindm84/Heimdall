@@ -122,7 +122,7 @@ Branch: `firewall-placeholder-vault`
 
 **Result (Nov 15):** done. On this laptop, `pii.find` takes a median 79 ms on a made-up 432-word email, after a 1.5 s one-time model load. The small model found "Priya Raman" but missed a later lone "Priya". So once a name is found, every whole-word mention of it, and of each part of it, in the same text is swapped too; all 24 name mentions in the sample are caught. The vault is SQLite at `/state/gateway.db` inside the gateway container, owned by its non-root user. Placeholders are numbered per agent run. The full suite passes: 147 tests, plus 1 symlink test skipped on Windows. That includes a seam test where the real container returns `{{PERSON_1}}`, `{{EMAIL_1}}` and `{{PHONE_1}}` for a made-up contacts file. Neither the made-up personal data nor the real key appears in the gateway logs. The gateway image is now 750 MB, mostly spaCy.
 
-**Known limits:** names the model misses entirely stay visible, and so do phone formats without separators. The vault file holds real values in plain text inside the gateway container. It is lost if the container is recreated, because there is no volume for `/state`.
+**Known limits:** names the model misses entirely stay visible, and so do phone formats without separators. The vault file holds real values in plain text. It lives in the named volume `gateway-state` (mounted at `/state` in the gateway only; added in `agents/gateway/compose.yaml`), so it survives rebuilds and recreates; `docker compose down -v` removes it. Checked Nov 15: a value written before `--force-recreate` was read back after.
 
 ## Step 3: model proxy (about 1.5 h)
 
