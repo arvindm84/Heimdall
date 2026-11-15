@@ -25,6 +25,10 @@ class GatewaySettings:
     # The gateway's own state (the placeholder vault). Holds real personal data; never mounted into agents.
     state_dir: Path = Path("/state")
 
+    def real_keys(self) -> list[str]:
+        """The provider keys the gateway holds. Seeing one leave is a leak."""
+        return [key for key in (self.gemini_key, self.anthropic_key) if key]
+
 
 def parse_fake_keys(text: str) -> dict[str, str]:
     """Turn 'openclaw:sk-fake-openclaw-01,hermes:sk-fake-hermes-01' into {key: agent}.

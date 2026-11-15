@@ -200,3 +200,19 @@ async def test_ask_that_fails_counts_as_deny(setup, events, monkeypatch):
     await denied(gateway, "files_write", {"path": "taxes/draft.txt", "text": "x"})
     assert not (settings.folders_dir / "taxes" / "draft.txt").exists()
     assert tool_calls(events)[0]["decision"] == "denied_by_user"
+
+
+@pytest.mark.parametrize(
+    "text, rule_id",
+    [
+        ("Stolen: sk-fake-openclaw-01", "key_theft_attempt"),
+        ("OPENAI_API_KEY=sk-proj-AbCdEfGhIjKlMnOpQrStUv01\nDEBUG=1\nPORT=80\n", "secret_in_tool_call"),
+    ],
+)
+async def test_write_carrying_a_key_is_refused_and_not_written(setup, events, text, rule_id):
+    settings, gateway, _ = setup
+    message = await denied(gateway, "files_write", {"path": "taxes/out.txt", "text": text})
+    assert rule_id in message
+    assert not (settings.folders_dir / "taxes" / "out.txt").exists()
+    assert tool_calls(events)[0]["rule_id"] == rule_id
+    assert "sk-fake-openclaw-01" not in str(events) and "AbCdEfGhIjKl" not in str(events)

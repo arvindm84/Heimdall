@@ -71,7 +71,7 @@ def build_gateway(
             files.write_file(target, text)
             return f"Wrote {len(text)} characters to {path}."
 
-        return await guard.run(ctx, "files_write", path, work)
+        return await guard.run(ctx, "files_write", path, work, outbound=text)
 
     # The model proxy shares the MCP server's HTTP app and port.
     mcp.custom_route("/model/{path:path}", methods=["GET", "POST"])(make_model_route(settings, transport))

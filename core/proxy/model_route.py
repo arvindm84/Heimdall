@@ -17,7 +17,7 @@ import httpx
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response, StreamingResponse
 
-from core.firewall import core_client
+from core.firewall import core_client, secrets
 from core.firewall.config import GatewaySettings
 from core.proxy import mock_model
 
@@ -100,6 +100,10 @@ def make_model_route(settings: GatewaySettings, transport: httpx.AsyncBaseTransp
         core_client.emit(
             "model_call", agent=agent, api_key=key, model=body.get("model"), tools_offered=tools_offered(body)
         )
+        # Tripwire and secret scan before anything else sees the body, mock included.
+        blocked = blocked_for_secrets(body, agent, path, settings)
+        if blocked is not None:
+            return blocked
         if settings.mock:
             return mock_model.reply(path, body)
         url, headers = upstream
@@ -112,6 +116,31 @@ def make_model_route(settings: GatewaySettings, transport: httpx.AsyncBaseTransp
         return await relay(url, headers, body, agent, transport)
 
     return model_route
+
+
+def blocked_for_secrets(body: dict, agent: str, path: str, settings: GatewaySettings) -> Response | None:
+    """403 if the body carries a fake key (theft) or any other secret; None if it is clean.
+
+    The auth header is not in the body, so an agent's own fake key there is fine.
+    Blocking (not stripping) is deliberate: the user should see the attempt.
+    """
+    findings = secrets.scan_json(body, settings.real_keys(), settings.fake_keys)
+    if not findings:
+        return None
+    theft = any(finding.kind == "fake_key" for finding in findings)
+    rule_id = "key_theft_attempt" if theft else "secret_in_request"
+    kinds = sorted({finding.kind for finding in findings})
+    core_client.emit(
+        "model_blocked",
+        agent=agent,
+        path=path,
+        rule_id=rule_id,
+        reason=f"request contains {', '.join(kinds)}",
+        findings=[{"kind": finding.kind, "preview": finding.preview} for finding in findings],
+    )
+    return JSONResponse(
+        {"error": f"Heimdall blocked this request: it contains {', '.join(kinds)} (rule {rule_id})"}, status_code=403
+    )
 
 
 async def relay(

@@ -14,7 +14,7 @@ from typing import NoReturn
 
 from mcp.server.fastmcp import Context
 
-from core.firewall import core_client, permissions, policy
+from core.firewall import core_client, permissions, policy, secrets
 from core.firewall.config import GatewaySettings
 from core.firewall.labels import from_contract
 from core.firewall.permissions import AgentRun, NoPermissions
@@ -54,8 +54,13 @@ class Guard:
             raise PermissionError("Heimdall: unknown agent")
         return agent, key
 
-    async def run(self, ctx: Context, tool: str, path: str | None, work: Work) -> str:
-        """Run one tool call under the policy. `path` is the agent's path argument (None if the call has none)."""
+    async def run(self, ctx: Context, tool: str, path: str | None, work: Work, outbound: str = "") -> str:
+        """Run one tool call under the policy.
+
+        path: the agent's path argument (None if the call has none).
+        outbound: text the call would send or store (a file's content, later a mail body or URL);
+        it is scanned for keys and secrets before anything else happens with it.
+        """
         agent, key = self.identify(ctx, tool)
         try:
             run = permissions.load(self.settings.agents_dir, agent, key)
@@ -74,6 +79,13 @@ class Guard:
         decision = policy.decide(tool, run.permissions, session, target.access if target else None)
         if decision.kind == "deny":
             self.refuse(agent, tool, path, session, "deny", decision.rule_id, decision.reason)
+        # Before asking the user anything: a call carrying a key is refused outright.
+        findings = secrets.scan(f"{path or ''}\n{outbound}", self.settings.real_keys(), self.settings.fake_keys)
+        if findings:
+            theft = any(finding.kind == "fake_key" for finding in findings)
+            found = ", ".join(f"{finding.kind} ({finding.preview})" for finding in findings)
+            rule_id = "key_theft_attempt" if theft else "secret_in_tool_call"
+            self.refuse(agent, tool, path, session, "deny", rule_id, f"contains {found}")
         outcome = "allow"
         if decision.kind == "ask":
             if not await self.ask_user(agent, tool, path, decision):
