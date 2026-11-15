@@ -1,0 +1,20 @@
+name: heimdall
+
+networks:
+  agents-net:
+    internal: true
+  outside: {}
+
+volumes:
+  gateway-ca: {}
+
+services:
+  gateway:
+    build: .
+    networks: [agents-net, outside]
+    env_file:
+      - path: ../../.env
+        required: false
+    volumes:
+      - gateway-ca:/ca
+      - ../../data/gateway:/config:ro

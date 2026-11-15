@@ -1,0 +1,14 @@
+{
+  "model": { "default": "gemini-flash-lite-latest", "provider": "gemini" },
+  "platform_toolsets": { "cli": [] },
+  "memory": { "memory_enabled": false, "user_profile_enabled": false },
+  "mcp_servers": {
+    "heimdall": {
+      "url": "http://gateway:8000/mcp",
+      "timeout": 130,
+      "headers": { "Authorization": "Bearer sk-fake-hermes-01" },
+      "tools": { "include": [] }
+    }
+  },
+  "telemetry": { "shared_metrics": { "enabled": false, "send": false, "offer_version": 2 } }
+}

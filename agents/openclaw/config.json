@@ -9,13 +9,13 @@
     "mode": "replace",
     "providers": {
       "heimdall": {
-        "baseUrl": "http://gateway:8080/model",
-        "apiKey": "${HEIMDALL_FAKE_KEY}",
-        "api": "anthropic-messages",
+        "baseUrl": "https://generativelanguage.googleapis.com/v1beta/openai",
+        "apiKey": "sk-fake-openclaw-01",
+        "api": "openai-completions",
         "models": [
           {
-            "id": "default",
-            "name": "Model chosen in Heimdall",
+            "id": "gemini-flash-lite-latest",
+            "name": "gemini-flash-lite-latest",
             "reasoning": false,
             "input": ["text"],
             "contextWindow": 200000,
@@ -25,11 +25,16 @@
       }
     }
   },
-  "agents": { "defaults": { "model": { "primary": "heimdall/default" }, "skipBootstrap": true } },
+  "agents": { "defaults": { "model": { "primary": "heimdall/gemini-flash-lite-latest" }, "skipBootstrap": true } },
   "tools": { "profile": "minimal", "alsoAllow": ["bundle-mcp"], "deny": ["session_status", "gateway"] },
   "mcp": {
     "servers": {
-      "heimdall": { "url": "http://gateway:8080/mcp", "transport": "streamable-http", "requestTimeoutMs": 130000 }
+      "heimdall": {
+        "url": "http://gateway:8000/mcp",
+        "transport": "streamable-http",
+        "requestTimeoutMs": 130000,
+        "headers": { "Authorization": "Bearer sk-fake-openclaw-01" }
+      }
     }
   },
   "plugins": {

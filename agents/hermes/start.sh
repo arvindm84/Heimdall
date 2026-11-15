@@ -1,6 +1,7 @@
 #!/bin/sh
 set -e
-cp /config/config.yaml /opt/data/config.yaml
+until [ -f /certs/mitmproxy-ca-cert.pem ]; do sleep 1; done
+cp /config/config.json /opt/data/config.yaml
 cp /opt/heimdall/SOUL.md /opt/data/SOUL.md
 mkdir -p /opt/data/logs
 rm -f /opt/data/logs/gateway.log

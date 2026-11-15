@@ -1,0 +1,30 @@
+name: heimdall
+
+include:
+  - ../gateway/compose.yaml
+
+services:
+  hermes:
+    build: .
+    networks: [agents-net]
+    depends_on: [gateway]
+    environment:
+      HEIMDALL_CHAT_TOKEN: ${HEIMDALL_HERMES_TOKEN:-dev-token-change-me}
+      HTTPS_PROXY: http://gateway:8080
+      HTTP_PROXY: http://gateway:8080
+      NO_PROXY: gateway,localhost,127.0.0.1
+      SSL_CERT_FILE: /certs/mitmproxy-ca-cert.pem
+      REQUESTS_CA_BUNDLE: /certs/mitmproxy-ca-cert.pem
+      GOOGLE_API_KEY: sk-fake-hermes-01
+      ANTHROPIC_API_KEY: sk-fake-hermes-01
+    volumes:
+      - ${HEIMDALL_HERMES_CONFIG:-./config.json}:/config/config.json:ro
+      - gateway-ca:/certs:ro
+
+  hermes-ui:
+    image: alpine/socat:1.8.0.3
+    networks: [agents-net, outside]
+    depends_on: [hermes]
+    command: TCP-LISTEN:7681,fork,reuseaddr TCP:hermes:7681
+    ports:
+      - "127.0.0.1:7682:7681"

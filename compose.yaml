@@ -1,53 +1,5 @@
 name: heimdall
 
-networks:
-  agents-net:
-    internal: true
-  outside: {}
-
-services:
-  gateway:
-    build: images/fake-gateway
-    networks: [agents-net, outside]
-    env_file:
-      - path: .env
-        required: false
-
-  openclaw:
-    build: images/openclaw
-    networks: [agents-net]
-    depends_on: [gateway]
-    environment:
-      HEIMDALL_CHAT_TOKEN: ${HEIMDALL_OPENCLAW_TOKEN:-dev-token-change-me}
-      HEIMDALL_FAKE_KEY: sk-fake-openclaw-01
-    volumes:
-      - ${HEIMDALL_OPENCLAW_CONFIG:-./images/openclaw/openclaw.json}:/config/openclaw.json:ro
-
-  openclaw-ui:
-    image: alpine/socat:1.8.0.3
-    networks: [agents-net, outside]
-    depends_on: [openclaw]
-    command: TCP-LISTEN:7681,fork,reuseaddr TCP:openclaw:7681
-    ports:
-      - "127.0.0.1:7681:7681"
-
-  hermes:
-    build: images/hermes
-    networks: [agents-net]
-    depends_on: [gateway]
-    environment:
-      HEIMDALL_CHAT_TOKEN: ${HEIMDALL_HERMES_TOKEN:-dev-token-change-me}
-      ANTHROPIC_BASE_URL: http://gateway:8080/model
-      ANTHROPIC_API_KEY: sk-fake-hermes-01
-      GEMINI_BASE_URL: http://gateway:8080/gemini/v1beta/openai
-      GOOGLE_API_KEY: sk-fake-hermes-01
-    volumes:
-      - ${HEIMDALL_HERMES_CONFIG:-./images/hermes/config.json}:/config/config.yaml:ro
-
-  hermes-ui:
-    image: alpine/socat:1.8.0.3
-    networks: [agents-net, outside]
-    depends_on: [hermes]
-    command: TCP-LISTEN:7681,fork,reuseaddr TCP:hermes:7681
-    ports:
-      - "127.0.0.1:7682:7681"
+include:
+  - agents/openclaw/compose.yaml
+  - agents/hermes/compose.yaml

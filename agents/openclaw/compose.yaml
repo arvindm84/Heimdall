@@ -1,0 +1,28 @@
+name: heimdall
+
+include:
+  - ../gateway/compose.yaml
+
+services:
+  openclaw:
+    build: .
+    networks: [agents-net]
+    depends_on: [gateway]
+    environment:
+      HEIMDALL_CHAT_TOKEN: ${HEIMDALL_OPENCLAW_TOKEN:-dev-token-change-me}
+      HTTPS_PROXY: http://gateway:8080
+      HTTP_PROXY: http://gateway:8080
+      NO_PROXY: gateway,localhost,127.0.0.1
+      NODE_EXTRA_CA_CERTS: /certs/mitmproxy-ca-cert.pem
+      NODE_USE_ENV_PROXY: "1"
+    volumes:
+      - ${HEIMDALL_OPENCLAW_CONFIG:-./config.json}:/config/config.json:ro
+      - gateway-ca:/certs:ro
+
+  openclaw-ui:
+    image: alpine/socat:1.8.0.3
+    networks: [agents-net, outside]
+    depends_on: [openclaw]
+    command: TCP-LISTEN:7681,fork,reuseaddr TCP:openclaw:7681
+    ports:
+      - "127.0.0.1:7681:7681"

@@ -1,8 +1,11 @@
+from typing import Literal
+
 from pydantic import BaseModel
 
 
 class FolderAccess(BaseModel):
     path: str
+    label: Literal["public", "private", "confidential"] = "private"
     write: bool = False
 
 
