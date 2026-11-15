@@ -11,7 +11,7 @@ Rules that apply to every step:
 ## Decisions made here that the whole build relies on
 
 1. **One process, one port.** `python -m core.gateway` runs a FastMCP (MCP SDK v1) app on `0.0.0.0:8080` that serves the MCP tools at `/mcp` (`stateless_http=True`) and the model proxy at `/model/{path}`. This is the same shape as B's `images/fake-gateway/server.py`, so the real gateway is a drop-in. Agents reach the model through a base URL (`http://gateway:8080/model`), not through an HTTPS proxy, so there is no mitmproxy and no CA certificate. Agents are on an `internal: true` network, so they have no other way out. Tools, the model route and `core_client.ask` are `async`, so one wait does not block the rest. `/state/gateway.db` (SQLite) holds the vault, Confidential markers and consent answers.
-2. **Config.** Permissions come from the contract `core/contracts/agents.py` (`AgentPermissions`, `FolderAccess`), read from `/config/agents/<agent>/permissions.json` once B's agent manager writes it (with a `run_id`; a new `run_id` starts a new session). Gateway-only settings live in `/config/gateway.json`: folder labels, each agent's fake key and provider (`anthropic`, `openrouter`, `ollama`, `mock`). JSON, so no PyYAML. Real keys come only from the gateway's environment (`ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`). The folder label moves into the contract in a `contract-change` PR with C.
+2. **Config.** Permissions come from the contract `core/contracts/agents.py` (`AgentPermissions`, `FolderAccess`), read from `/config/agents/<agent>/permissions.json`, which B's agent manager writes with a `run_id` (a new `run_id` starts a new session). Folder labels are on `FolderAccess` in the contract. The provider follows the API the agent speaks. No other config file. The gateway's environment holds the fake-key map (`HEIMDALL_FAKE_KEYS`, set in `agents/gateway/compose.yaml`) and the real keys (`GEMINI_API_KEY`, `ANTHROPIC_API_KEY` from `.env`).
 3. **Agent identity = its fake key.** Model calls already carry it in `x-api-key`. MCP calls must carry `Authorization: Bearer sk-fake-<agent>-01`; OpenClaw does not send it yet (issue to B). From Step 1, an MCP call without a known key is denied. The guard also checks the tool against `AgentPermissions.tools`; OpenClaw hiding a tool is not a control. OpenClaw shows tools to the model as `heimdall__<name>`; the gateway registers bare names.
 4. **Event format.** One JSON line on stdout per event, with a `kind` field (as the fake gateway does). B's runtime test reads `{"kind": "model_call", "api_key", "tools_offered"}` from `docker compose logs gateway`, so that event keeps those fields; `api_key` is logged only when it is a fake key.
 5. **Confidential markers.** Every tool result from a Confidential folder is wrapped as `<<heimdall:conf:7f3a9c>> ... <</heimdall:conf:7f3a9c>>` with a random id stored in SQLite. The proxy looks for these ids in outbound model requests. If an agent strips the markers, the proxy falls back to matching the stored text in chunks of at least 80 characters.
@@ -48,29 +48,58 @@ Branch: `firewall/skeleton`
 - C: an endpoint the gateway can POST plain events to (no waiting), and where `/events` already streams them.
 - B: switch `compose.yaml`'s gateway to `images/gateway`; OpenClaw's MCP server sends `Authorization: Bearer ${HEIMDALL_FAKE_KEY}`.
 
-## Step 1: labels, sessions, policy, guard, real file tools (about 1.5 h)
+## Step 1: permissions, labels, sessions, policy guard, real file tools (about 2 h)
 
-Branch: `firewall/policy-core`
+Branch: `firewall-policy-core` (a branch named `firewall/...` can't exist next to `firewall`).
 
-**Tests first:**
-- `test_labels.py`: `join(PUBLIC, CONFIDENTIAL) == CONFIDENTIAL`; labels never go down.
-- `test_policy.py`: one test per row of the rule table in `firewall-plan.md`, for example `test_files_read_denied_outside_permissions`, `test_files_write_asks_when_session_untrusted`, `test_gmail_send_always_asks`, `test_web_fetch_denied_when_url_holds_placeholder`, `test_unknown_tool_denied`.
-- `test_files_tool.py`: `../` and absolute paths denied; a symlink pointing outside the folder denied; file over 2 MB denied; listing shows only allowed folders.
-- `test_guard.py`: missing or unknown bearer key is denied; a tool not in `AgentPermissions.tools` is denied; deny never runs the tool; ask with `deny` never runs the tool; ask that errors counts as deny; every path emits exactly one decision event.
+**What this step builds on** (all in place and tested): the gateway names the agent from the bearer key on every MCP call (`core/gateway.py` `caller`). B's manager writes `/config/agents/<agent>/permissions.json` as `{run_id, fake_key, permissions: AgentPermissions}`. Each allowed folder is mounted at `/data/folders/<name>`, and `FolderAccess` carries `label` and `write`. `core_client.ask` posts to `/raise`.
+
+**Decisions for this step:**
+1. **Permissions come from `permissions.json`, re-read on every tool call.** The file is small, and re-reading picks up a reopen. The key on the call must match both `HEIMDALL_FAKE_KEYS` and the file's `fake_key`. No file means the agent wasn't opened by Heimdall: deny (`no_permissions`). There is no separate `gateway.json`: labels are in the contract, and the provider follows the API the agent speaks.
+2. **A folder's name is the last part of its resolved host path**, the same name B's manager mounts it under. One small fix in `agents/manager.py` `write_permissions`: store each `FolderAccess.path` resolved (`Path(...).expanduser().resolve()`), as `gateway_folder_mounts` already does. Today the raw path the user typed (`.`, `~/docs`) is stored, and the gateway can't always tell which mount it is. The test for this goes in `agents/test_manager.py`.
+3. **Paths agents use are `<folder>/<path inside it>`.** `files_list()` with no folder returns the allowed folders with their label and whether they're writable. `files_list(folder)` returns that folder's files as relative paths (recursive, first 200). The tool descriptions say this, so the model knows to list first.
+4. **One session per `(agent, run_id)`, in memory.** It holds the label (only goes up), the untrusted flag and a random delimiter (used in Step 4). A new `run_id` starts a fresh session. Known limit: a gateway restart also resets sessions. SQLite arrives with the vault in Step 2.
+5. **Only `files_read` raises the session label** (to the folder's label). Listing shows file names, not content, so it doesn't.
+6. **One event per tool call.** Every attempt by a known agent emits exactly one `tool_call` event: `{agent, tool, path, decision, rule_id, reason, label}`. `decision` is `allow`, `deny`, `approved` or `denied_by_user`. Denied attempts are still `tool_call` lines, so B's `check_sealed_and_routed` (which looks for any `files_read` call) keeps passing. Calls from unknown agents keep the separate `tool_denied` event, since there is no agent to name.
+7. **Text and PDF only.** Files are read as UTF-8 text, or through `pypdf` for `.pdf` (new dependency, reason: scene 6 reads `tax-2025.pdf`). Anything else is denied. The size limit is 2 MB for reads and writes.
+
+**Rules** (`policy.decide` for permission checks; `tools/files.py` for path checks; each has a `rule_id`):
+
+| rule_id | When | Decision |
+|---|---|---|
+| `no_permissions` | no `permissions.json`, or its key doesn't match | deny |
+| `tool_not_permitted` | tool not in `permissions.tools` | deny |
+| `folder_not_permitted` | first path part isn't an allowed folder | deny |
+| `path_escapes_folder` | `..`, absolute path, or a symlink that resolves outside the folder | deny |
+| `not_found` | no such file or folder | deny |
+| `file_too_large` | over 2 MB | deny |
+| `not_text` | not UTF-8 and not a PDF | deny |
+| `folder_read_only` | `files_write` to a folder without `write` | deny |
+| `write_after_untrusted` | `files_write` after the session read untrusted content | ask (approval) |
+| `files_list_allowed`, `files_read_allowed`, `files_write_allowed` | otherwise | allow |
+
+Gmail and web rules are added in the steps that build those tools.
+
+**Tests first** (`tests/firewall/`; folders built in `tmp_path` with made-up files):
+- `test_labels.py`: `join` takes the higher label; a session label never goes down; the contract strings map to `Label`.
+- `test_permissions.py`: loads `permissions.json`; missing file or wrong key gives `no_permissions`; folder name from a resolved Windows path and from a POSIX path.
+- `test_session.py`: same `run_id` gives the same session; a new `run_id` gives a fresh one (label back to Public).
+- `test_policy.py`: one test per rule above.
+- `test_files_tool.py`: reads a text file and a PDF; `..`, an absolute path and an escaping symlink are denied; over 2 MB denied; binary denied; listing shows only allowed folders; a write lands in a writable folder and is denied in a read-only one.
+- `test_guard.py`: deny never runs the tool; ask plus `deny` never runs it; ask that errors counts as deny; every path emits exactly one `tool_call` event; reading a Confidential file raises the session label.
+- Seam test, with B: `tests/seams/test_agent_gateway.py` (Docker, needs `GEMINI_API_KEY`). Open OpenClaw with a temp folder holding a made-up `notes.txt`, ask it to read the file, and expect one `tool_call` with `decision: allow`. Ask it to read outside the folder and expect `decision: deny`.
 
 **Build:**
-1. `config.py`: pydantic model for `gateway.json` (folder labels, agents' fake keys and providers); loader for `AgentPermissions` from `/config/agents/<agent>/permissions.json`; lookup from fake key to agent. Import the contract models, never retype them.
-2. `labels.py`: `Label` as an `IntEnum` (Public 0, Private 1, Confidential 2), `join()`.
-3. `session.py`: `Session(agent, label, untrusted, delimiter)` stored in SQLite; `raise_label()`, `mark_untrusted()`. One session per agent container; reset when B restarts it (the core tells us, or a new fake key per run).
-4. `policy.py`: `Decision(kind: allow|ask|deny, ask_kind: approval|consent|None, rule_id, reason)`; `decide(tool, args, session, config)` as one plain function with one `if` block per tool. No rule engine.
-5. `guard.py`: `guarded(tool_name)` decorator: identify agent, `decide`, `ask` if needed, run the tool, then the after-steps (sanitize, label, placeholders, wrap; empty for now), emit.
-6. `tools/files.py`: `files_list(folder)`, `files_read(path)`, `files_write(path, text)`. Folders mounted at `/data/folders/<name>`. Resolve with `Path.resolve()` and check `is_relative_to(root)`. Text files and PDFs (`pypdf`, reason: scene 6 reads `tax-2025.pdf`).
+1. `core/firewall/labels.py`: `Label` `IntEnum` (Public 0, Private 1, Confidential 2), `from_contract()`, `join()`.
+2. `core/firewall/permissions.py`: `load(agent, key)` reads `/config/agents/<agent>/permissions.json` (directory from `HEIMDALL_AGENTS_DIR`) into the contract's `AgentPermissions`, plus `run_id`; `folder_name()`.
+3. `core/firewall/session.py`: `Session` dataclass plus `sessions.for_agent(agent, run_id)`.
+4. `core/firewall/policy.py`: `Decision(kind, rule_id, reason)`, `decide(tool, args, session, permissions)`. One plain `if` block per tool; no rule engine.
+5. `core/firewall/tools/files.py`: `resolve(path, permissions) -> (Path, FolderAccess)`, raising `Denied(rule_id)`; `list_files`, `read_text`, `write_text`. Folder root from `HEIMDALL_FOLDERS_DIR` (default `/data/folders`).
+6. `core/firewall/guard.py`: `run_guarded(tool, args, ctx, work)`. It identifies the agent, loads permissions and the session, calls `decide`, asks if needed, runs `work`, raises the label, and emits the one event. It turns a denial into a clear error message for the agent.
+7. `core/gateway.py`: the tools become `files_list(folder="")`, `files_read(path)`, `files_write(path, text)`, each calling `run_guarded`. Canned files go.
+8. `agents/manager.py`: the one-line resolve fix from decision 2.
 
-**Done when:** a test agent can read an allowed folder, is denied outside it, and each attempt shows as one event with its `rule_id`.
-
-**Issues to file:**
-- B: mount user folders into the gateway (read-only unless writable), never into agent containers; the agent manager writes `data/agents/<agent>/permissions.json` with a `run_id` and mounts `data/agents` read-only at `/config/agents` in the gateway.
-- C: contract models for folder labels, agent permissions and the decision event (start the `contract-change` PR together).
+**Done when:** `uv run pytest` passes (B's tests and ours, Docker included), and the seam test shows an allowed read and a denied read, each as one `tool_call` event with its `rule_id`.
 
 ## Step 2: placeholder vault (about 1.5 h)
 
