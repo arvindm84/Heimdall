@@ -36,7 +36,11 @@ If a judge has more time: the **OpenClaw mini-demo** (section 6), or open the st
    printf 'Garden plan: turn the compost every other week. Seed swap Saturday.\n' > ~/HeimdallDemo/Notes/garden.txt
    printf 'Made-up 2025 return for Jordan Lee.\nAdjusted gross income: 71,250.\nRefund due: 1,140.\n' > ~/HeimdallDemo/Taxes/return.txt
    ```
-4. **Mac check that was never done** (`firewall-plan.md`, item 4): the gateway must reach the back end at `host.docker.internal:8765`. Scene 3 proves events arrive; scene 4 proves questions arrive. If no pop-up ever appears and Activity shows nothing, this is why. Stop and fix it before anything else.
+4. **Mac check** (`firewall-plan.md`, item 4; done on Windows, never on a Mac). The gateway sends events and questions to the back end at `host.docker.internal:8765`. Without that link the dashboard gets no events and no pop-ups, and every question counts as a deny. Docker Desktop for Mac should forward it as on Windows; this confirms it. Do step 5 first (the gateway starts with Hermes), then from the repo root:
+   ```bash
+   docker compose exec -T gateway python -c 'import urllib.request as u, json; r = u.Request("http://host.docker.internal:8765/api/event", json.dumps({"kind": "mac_check"}).encode(), {"Content-Type": "application/json"}); print("back end reached:", u.urlopen(r, timeout=5).status)'
+   ```
+   `back end reached: 204` means done, nothing to fix. If it fails: the app isn't open (the back end runs only while `run.py` does), or the Mac uses another Docker runtime (Colima, Rancher Desktop) that doesn't forward `host.docker.internal` to the Mac's 127.0.0.1, so switch to Docker Desktop. Don't make the back end listen on 0.0.0.0 to get around it: that opens the dashboard, approve button included, to the whole network.
 5. **First start:** `uv run python run.py`. On Hermes's card click **Start**. In the folder popup mark `HeimdallDemo/Notes` **Public** and `HeimdallDemo/Taxes` **Confidential**, then **Save and start**. The first start builds and takes minutes; later starts take about 30 seconds.
 6. **Chat:** when Hermes shows Running, click **Open chat**. The browser asks for a login: user `heimdall`, password from the card's Copy button. Keep that tab beside the Heimdall window.
 
