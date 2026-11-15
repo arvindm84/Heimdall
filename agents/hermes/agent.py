@@ -19,11 +19,11 @@ def build_config(permissions: AgentPermissions, provider: str, model: str) -> di
     if provider == "local":
         # Hermes's own name for any OpenAI-style server. The gateway passes it on to Ollama.
         config["model"] = {"default": model, "provider": "custom", "base_url": LOCAL_URL, "api_key": FAKE_KEY}
-    # Memory is the gateway's labelled notes (memory_read, memory_write), not Hermes's own:
-    # its own notes go into the prompt without passing the firewall, so they carry no label.
-    memory_tools = ["memory_read", "memory_write"] if permissions.memory else []
-    config["mcp_servers"]["heimdall"]["tools"]["include"] = [*permissions.tools, *memory_tools]
+    config["mcp_servers"]["heimdall"]["tools"]["include"] = list(permissions.tools)
     toolsets = config["platform_toolsets"]["cli"]
+    if permissions.memory:
+        toolsets.append("memory")
+        config["memory"]["memory_enabled"] = True
     if permissions.delegation:
         toolsets.append("delegation")
     return config

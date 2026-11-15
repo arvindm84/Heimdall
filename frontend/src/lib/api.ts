@@ -8,7 +8,7 @@ export type LaunchConfig = {
   tools?: string[];
   folders?: { path: string; label: "public" | "private" | "confidential"; write?: boolean }[];
   skills?: string[]; // OpenClaw only
-  memory?: boolean; // labelled notes kept in the gateway
+  memory?: boolean; // Hermes only
   delegation?: boolean; // Hermes only
   provider?: "gemini" | "anthropic" | "local";
   model?: string;

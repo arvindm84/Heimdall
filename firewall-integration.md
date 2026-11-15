@@ -21,8 +21,8 @@ The firewall is one container, `gateway`, built from `images/gateway/Dockerfile`
 - **Personal data** in file, mail and web text reaches the agent as typed placeholders (`{{EMAIL_1}}`). The real values stay in the gateway's vault (the `gateway-state` volume) and are filled in only in an email the user has approved.
 - **Mail and web pages** are cleaned of hidden text before the agent sees them. Hidden text that looks like an instruction becomes a `hidden_instruction` event.
 - **Approvals:** sending email always asks the user. After the agent has read mail or a web page, file writes and web fetches ask too.
-- **Consent:** before text from a Confidential folder (or a Confidential note) goes to a cloud model, the user is asked once per file per run, and can allow that file or the whole folder for the run. A deny strips the text and the request still goes out.
-- **Memory:** notes are kept in the gateway, each with the label of the session that wrote it. Reading notes raises the reader's label to theirs. The same applies to sends and fetches after a Confidential read. The local model is never asked about.
+- **Consent:** before text from a Confidential folder goes to a cloud model, the user is asked once per file per run, and can allow that file or the whole folder for the run. A deny strips the text and the request still goes out. The same applies to sends and fetches after a Confidential read. The local model is never asked about.
+- **Memory:** Hermes keeps its own memory in its container (B's `heimdall-memory`: list, show, snapshot, rollback). It doesn't pass the firewall, so notes carry no label and a Confidential note reaches the model without a consent question (section 5).
 - **Secrets:** a fake key or any other secret in a model request or a tool argument is blocked (`key_theft_attempt`, `secret_in_request`, `secret_in_tool_call`).
 
 ## 2. Agents (B)
@@ -57,10 +57,8 @@ Use a tool timeout of 130 s: an approval can wait up to 125 s. Both agents' conf
 | `gmail_draft` | `to`, `subject`, `body` | Saves a draft in the gateway; never asks |
 | `gmail_send` | `to`, `subject`, `body` | Always asks; fills in placeholders after approval |
 | `web_fetch` | `url` | GET only, public addresses only; asks after untrusted or private data |
-| `memory_write` | `text` | Saves a note with this session's label; only with `memory: true` |
-| `memory_read` | none | The newest 50 notes; raises the session label; Confidential notes come in markers |
 
-Only the tools listed in the agent's permissions are offered to the model (`build_config` does this for both agents) and allowed by the gateway. `memory: true` adds the two memory tools; Hermes's own memory stays off, because its notes would reach the model without passing the firewall.
+Only the tools listed in the agent's permissions are offered to the model (`build_config` does this for both agents) and allowed by the gateway.
 
 ### `permissions.json`
 
@@ -168,4 +166,4 @@ After any change to an agent config, the compose files, `backend/app.py` or `not
 | AI injection check live | A | Issue #13. Built; runs once an Anthropic key is in the gateway |
 | Real Ollama on the demo laptop | B | Wired and tested against a stand-in; install Ollama and pull `llama3.2:3b` |
 | Choosing the provider in the app | Everyone (UI) | `frontend/src/data/agents.ts` still sends `gemini`; scene 6 needs a way to pick `local` |
-| Rolling back gateway notes | A and B | Notes are kept with their time; no rollback command yet |
+| Labels on memory notes | B and A | Decided Nov 15 to keep Hermes's own memory (with snapshots and rollback). Its notes carry no label and skip consent: a gap against `project-plan.md` section 6, items 2 and 3 |

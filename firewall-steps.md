@@ -292,7 +292,7 @@ The user asked us to fix the B and C to-dos ourselves (GitHub issues #1 to #11),
 - #1, #11: the manager writes `provider` and `model` into `permissions.json`; the gateway refuses another provider or model (`model_not_chosen` is new).
 - #6: the consent answer's `scope` (`once`, `folder`) reaches the gateway; "folder" covers every file in it for the run. The pop-up offers "Allow this file" and "Always for <folder>". Not type-checked here: Node isn't installed on this laptop.
 - #2: `local` provider for both agents (Hermes as `provider: custom`). Ran live on both against a stand-in Ollama server; real Ollama isn't installed here.
-- #4: labelled memory as gateway tools (`memory_read`, `memory_write`), notes in SQLite with the writer's label and untrusted flag; Hermes's own memory stays off. Ran live on Hermes across two runs.
+- #4: built labelled memory as gateway tools, then reverted it when B's Hermes memory (snapshots, show, rollback) landed on main: the user chose B's. Labels on notes stay open.
 - #5: decided, no egress logger (see the integration guide, Scene 4). Live: with the demo skill forced in, OpenClaw made no tool calls.
 
 ## Step 7: extras, only if steps 0 to 6 are merged and the demo runs

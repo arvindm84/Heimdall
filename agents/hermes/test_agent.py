@@ -36,10 +36,8 @@ def test_local_model_is_an_openai_style_endpoint_on_the_gateway():
 
 def test_memory_and_delegation_are_added_when_permitted():
     config = agent.build_config(AgentPermissions(memory=True, delegation=True), "gemini", testing.MODEL)
-    assert config["platform_toolsets"]["cli"] == ["delegation"]
-    # Memory goes through the gateway, where every note carries a label; Hermes's own stays off.
-    assert config["mcp_servers"]["heimdall"]["tools"]["include"] == ["memory_read", "memory_write"]
-    assert config["memory"]["memory_enabled"] is False
+    assert config["platform_toolsets"]["cli"] == ["memory", "delegation"]
+    assert config["memory"]["memory_enabled"] is True
 
 
 @pytest.fixture(scope="module")

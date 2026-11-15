@@ -17,7 +17,6 @@ from core.firewall.session import Session
 
 
 PLACEHOLDER = re.compile(r"\{\{[A-Z]+_\d+\}\}")
-MEMORY_TOOLS = {"memory_read", "memory_write"}
 
 
 @dataclass(frozen=True)
@@ -40,14 +39,6 @@ def decide(
     access: the folder the call's path points into (None if no path).
     outbound: what the call would send out (for web_fetch, the URL).
     """
-    # Memory is one switch in the permissions (AgentPermissions.memory), not two tools.
-    if tool in MEMORY_TOOLS:
-        if not permissions.memory:
-            return Decision("deny", "memory_not_permitted", "memory is off for this agent")
-        if tool == "memory_write":
-            reason = f"the note keeps this session's label ({session.label})"
-            return Decision("allow", "memory_write_allowed", reason)
-        return Decision("allow", "memory_read_allowed", "notes raise this session's label to theirs")
     if tool not in permissions.tools:
         return Decision("deny", "tool_not_permitted", f"{tool} is not in this agent's allowed tools")
     if tool == "files_list":

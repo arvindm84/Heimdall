@@ -15,7 +15,6 @@ from mcp.server.transport_security import TransportSecuritySettings
 from core.firewall.confidential import ConfidentialStore
 from core.firewall.config import GatewaySettings, load_settings
 from core.firewall.guard import Guard
-from core.firewall.memory import Memory
 from core.firewall.session import Sessions
 from core.firewall.tools import files, gmail, web
 from core.firewall.tools.files import Denied
@@ -55,8 +54,6 @@ def build_gateway(
     # Confidential text served and the user's consent answers, shared by the tools and the model proxy.
     confidential = ConfidentialStore(settings.state_dir / "gateway.db")
     guard = Guard(settings, sessions, Vault(settings.state_dir / "gateway.db"), checker, confidential)
-    # Each agent's labelled notes (memory_read, memory_write).
-    memory = Memory(settings.state_dir / "gateway.db")
 
     # Tool names use underscores: the Claude API rejects dots in tool names.
     # Tools are async so an approval wait does not block other calls.
@@ -143,26 +140,6 @@ def build_gateway(
             check=lambda: gmail.check_message(settings.gmail_source, to, subject),
             fill={"to": to, "subject": subject, "body": body},
         )
-
-    @mcp.tool(structured_output=False)
-    async def memory_write(text: str, ctx: Context) -> str:
-        """Save a note to remember in later chats. Keep placeholders like {{EMAIL_1}} as they are.
-        A note carries the label of what you have read in this chat (a note written after reading
-        a Confidential file is Confidential)."""
-
-        def work(run, session):
-            if len(text) > Memory.MAX_NOTE_CHARS:
-                raise Denied("note_too_long", f"a note can hold at most {Memory.MAX_NOTE_CHARS} characters")
-            number = memory.write(run.agent, text, session.label, session.untrusted)
-            return f"Saved note {number} ({session.label})."
-
-        return await guard.run(ctx, "memory_write", None, work, outbound=text)
-
-    @mcp.tool(structured_output=False)
-    async def memory_read(ctx: Context) -> str:
-        """Read your saved notes, oldest first. Text from Confidential notes comes between
-        <<confidential:...>> markers: keep them."""
-        return await guard.run(ctx, "memory_read", None, lambda run, session: memory.read(run.agent))
 
     @mcp.tool(structured_output=False)
     async def web_fetch(url: str, ctx: Context) -> str:
