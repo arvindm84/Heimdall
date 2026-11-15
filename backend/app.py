@@ -1,21 +1,26 @@
 """Flask back end for the dashboard.
 
+Run from the repo root:  uv run python -m backend.app
+
 Routes:
-    POST /launch    Start an agent's container from the frontend's config.   (owner: launch/kill)
-    POST /kill      Kill a specific agent container.                          (owner: launch/kill)
-    POST /raise     Firewall reports a blocked request to the dashboard.      (owner: raise/response)
-    GET  /events    Stream the dashboard listens on for raised requests.      (owner: raise/response)
-    POST /response  User's answer to a halted-request notification.           (owner: raise/response)
+    GET  /agents    Agents and providers the UI can offer, and open chats.   (owner: launch/kill)
+    POST /launch    Start an agent with the user's permissions and model.    (owner: launch/kill)
+    POST /stop      Stop an agent's container.                               (owner: launch/kill)
+    POST /kill      Kill and remove an agent's container.                    (owner: launch/kill)
+    POST /raise     Firewall reports a blocked request to the dashboard.     (owner: raise/response)
+    GET  /events    Stream the dashboard listens on for raised requests.     (owner: raise/response)
+    POST /response  User's answer to a halted-request notification.          (owner: raise/response)
 
 Routes stay thin: read the JSON body, call a service, return JSON.
 The real work lives in services/.
 """
 
 import json
+import subprocess
 
 from flask import Flask, Response, jsonify, request
 
-from services import docker_service, notification_service
+from backend.services import agent_service, notification_service
 
 app = Flask(__name__)
 
@@ -30,27 +35,78 @@ def missing(body: dict, *fields: str):
     return None
 
 
+# Errors raised by the services, turned into JSON the frontend can show.
+
+@app.errorhandler(ValueError)
+def bad_request(error):
+    # Unknown agent or provider, bad folder, wrong config shape
+    # (pydantic's ValidationError is a ValueError too).
+    return jsonify({"error": str(error)}), 400
+
+
+@app.errorhandler(subprocess.CalledProcessError)
+def docker_failed(error):
+    # A docker compose command failed. Its stderr says why (Docker not running,
+    # port in use, build error...), so pass the end of it on.
+    detail = (error.stderr or "").strip()[-2000:]
+    return jsonify({"error": "docker compose failed", "detail": detail}), 500
+
+
+@app.errorhandler(TimeoutError)
+def chat_timeout(error):
+    # The container started but its chat never answered.
+    return jsonify({"error": str(error)}), 504
+
+
+@app.get("/agents")
+def agents():
+    # Returns: {"agents": [{"name", "chat"}], "providers": [{"name", "default_model"}]}
+    # "chat" holds chat_url / chat_user / chat_token for agents launched from here, else null.
+    return jsonify(agent_service.list_agents()), 200
+
+
 @app.post("/launch")
 def launch():
     # Body: {"agent": "openclaw" | "hermes", "config": {...}}
-    # config holds folders, tools, network access, model, etc.
-    # Returns: container id and the address of the agent's chat UI.
+    # config (every field optional):
+    #   folders     [{"path": "/abs/path", "label": "public"|"private"|"confidential", "write": false}]
+    #   tools       ["files_read", "files_list"]
+    #   memory      bool (Hermes only)
+    #   delegation  bool (Hermes only)
+    #   provider    "gemini" | "anthropic"
+    #   model       model name; leave out for the provider's default
+    # Returns: {"agent", "chat_url", "chat_user", "chat_token"}
+    # Slow: answers once the agent's chat is up. Calling it again for a running
+    # agent restarts it with the new config (new chat_token).
     body = request.get_json(silent=True) or {}
     if err := missing(body, "agent", "config"):
         return err
+    if not isinstance(body["config"], dict):
+        return jsonify({"error": "config must be an object"}), 400
 
-    result = docker_service.launch_agent(body["agent"], body["config"])
+    result = agent_service.launch_agent(body["agent"], body["config"])
     return jsonify(result), 201
+
+
+@app.post("/stop")
+def stop():
+    # Body: {"agent": "openclaw" | "hermes"}
+    body = request.get_json(silent=True) or {}
+    if err := missing(body, "agent"):
+        return err
+
+    agent_service.stop_agent(body["agent"])
+    return jsonify({"status": "stopped"}), 200
 
 
 @app.post("/kill")
 def kill():
-    # Body: {"container_id": "..."}
+    # Body: {"agent": "openclaw" | "hermes"}
     body = request.get_json(silent=True) or {}
-    if err := missing(body, "container_id"):
+    if err := missing(body, "agent"):
         return err
 
-    docker_service.kill_agent(body["container_id"])
+    agent_service.kill_agent(body["agent"])
     return jsonify({"status": "killed"}), 200
 
 
@@ -104,4 +160,4 @@ def response():
 
 if __name__ == "__main__":
     # 127.0.0.1 only: the back end must never be reachable from the network.
-    app.run(host="127.0.0.1", port=5000, debug=True)
+    app.run(host="127.0.0.1", port=5050, debug=True)
