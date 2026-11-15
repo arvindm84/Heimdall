@@ -6,6 +6,10 @@ dependencies = ["pydantic>=2"]
 
 [dependency-groups]
 dev = ["pytest>=8"]
+gateway = ["httpx>=0.28.1", "mcp==1.30.0"]
+
+[tool.uv]
+default-groups = ["dev", "gateway"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
