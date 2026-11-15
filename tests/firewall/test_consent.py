@@ -380,3 +380,48 @@ async def test_one_file_spelled_two_ways_is_asked_about_once(world, asked):
     second = await read(gateway, "taxes/./return.txt")
     await post(gateway, "chat/completions", openai_request(first + second))
     assert [details["file"] for _, details, _ in asked] == ["taxes/return.txt"]
+
+
+# ---------- Confidential text anywhere in the request ----------
+
+
+async def test_confidential_text_outside_a_tool_result_is_withheld_too(world, asked):
+    """An agent can copy file text into any message, not only the tool result it came in."""
+    settings, gateway, seen, sessions = world
+    asked.answer = "deny"
+    await read(gateway)
+    body = {
+        "model": "gemini-flash-lite-latest",
+        "messages": [
+            {"role": "system", "content": "Notes so far. Adjusted gross income: 71,250."},
+            {"role": "user", "content": "Adjusted gross income: 71,250."},
+            {"role": "assistant", "content": "The file says: adjusted gross income: 71,250."},
+            {"role": "user", "content": "And the garden opens at nine."},
+        ],
+    }
+    await post(gateway, "chat/completions", body)
+    assert len(asked) == 1
+    contents = [message["content"] for message in forwarded(seen)["messages"]]
+    assert contents == [WITHHELD, WITHHELD, WITHHELD, "And the garden opens at nine."]
+
+
+async def test_anthropic_text_parts_and_system_prompt_are_withheld_too(world, asked):
+    settings, gateway, seen, sessions = world
+    asked.answer = "deny"
+    await read(gateway)
+    body = {
+        "model": "claude-haiku-4-5",
+        "max_tokens": 100,
+        "system": [{"type": "text", "text": "Adjusted gross income: 71,250."}],
+        "messages": [
+            {"role": "user", "content": [
+                {"type": "text", "text": "Adjusted gross income: 71,250."},
+                {"type": "text", "text": "What is my refund?"},
+            ]},
+        ],
+    }  # fmt: skip
+    await post(gateway, "v1/messages", body)
+    sent = forwarded(seen)
+    assert sent["system"] == [{"type": "text", "text": WITHHELD}]
+    assert [part["text"] for part in sent["messages"][0]["content"]] == [WITHHELD, "What is my refund?"]
+    assert len(asked) == 1
