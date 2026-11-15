@@ -74,6 +74,10 @@ def test_delegation_and_memory_are_offered_when_permitted():
     manager.open_agent("hermes", AgentPermissions(tools=["files_read"], memory=True, delegation=True))
     try:
         calls = [call for call in testing.ask("hermes", "Say hi") if call["tools_offered"]]
-        assert {"delegate_task", "memory"} <= set(calls[-1]["tools_offered"])
+        offered = set(calls[-1]["tools_offered"])
+        # Memory is the gateway's labelled notes (MCP tools), never Hermes's own unlabelled memory.
+        assert "delegate_task" in offered and "memory" not in offered
+        listing = testing.in_agent("hermes", "hermes", "tools", "list")
+        assert "include only: files_read, memory_read, memory_write" in listing
     finally:
         manager.kill_agent("hermes")
