@@ -21,6 +21,7 @@ The real work lives in services/.
 """
 
 import json
+import os
 import subprocess
 import time
 from pathlib import Path
@@ -31,6 +32,17 @@ from backend.services import agent_service, notification_service
 
 # Not 5000: macOS AirPlay Receiver uses that port.
 PORT = 8765
+
+# Where Docker Desktop usually puts the `docker` command. An app opened from Finder or the Dock
+# doesn't load ~/.zprofile, so `docker` may be missing from PATH even when it's installed.
+# Appended (not prepended) so a PATH that already finds docker keeps winning.
+DOCKER_DIRS = [
+    Path.home() / ".docker" / "bin",
+    Path("/usr/local/bin"),
+    Path("/opt/homebrew/bin"),
+    Path("/Applications/Docker.app/Contents/Resources/bin"),
+]
+os.environ["PATH"] = os.pathsep.join([os.environ.get("PATH", ""), *(str(d) for d in DOCKER_DIRS if d.is_dir())])
 
 # The built UI (made by `npm run build` in frontend/). Flask serves these files as-is.
 FRONTEND_DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"
