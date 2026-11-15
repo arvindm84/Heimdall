@@ -5,20 +5,32 @@ networks:
     internal: true
   outside: {}
 
+volumes:
+  # The placeholder vault (real personal data). Survives rebuilds and recreates;
+  # only `docker compose down -v` removes it. Mounted into the gateway, never into agents.
+  gateway-state: {}
+
 services:
   gateway:
-    # Stand-in with the same port and paths as A's gateway. To switch to A's:
-    #   build: { context: ../.., dockerfile: images/gateway/Dockerfile }
-    build: .
+    # A's gateway (core/gateway.py): MCP tools at /mcp and the model proxy at /model on 8080.
+    # Built from the repo root because the image needs core/ and uv.lock.
+    build: { context: ../.., dockerfile: images/gateway/Dockerfile }
     networks: [agents-net, outside]
     env_file:
       - path: ../../.env
         required: false
     environment:
-      HEIMDALL_FAKE_KEYS: openclaw:sk-fake-openclaw-01,hermes:sk-fake-hermes-01
+      HEIMDALL_EVENTS_URL: http://host.docker.internal:8765/api/event
+      # Real keys saved in the app (backend/services/key_service.py) win over .env.
+      # Empty in the back end's environment: compose takes them from the repo's .env instead.
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      HEIMDALL_FAKE_KEYS: openclaw:sk-fake-openclaw-01,hermes:sk-fake-hermes-01
     volumes:
       # Each agent's permissions.json. User folders are added by the agent manager
       # (data/gateway/compose.folders.yaml) at /data/folders/<name>.
       - ../../data/agents:/config/agents:ro
+      - gateway-state:/state
+      # Made-up inbox for gmail_read in fixture mode (scene 3, offline). Move to D's attacks/
+      # once the demo attack email lives there.
+      - ../../tests/firewall/fixtures/inbox:/data/inbox:ro

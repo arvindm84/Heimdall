@@ -1,0 +1,27 @@
+"""Shared fixtures for the firewall tests. All keys here are made up."""
+
+import pytest
+
+from core.firewall import core_client
+from core.firewall.config import GatewaySettings
+from tests.firewall.helpers import FAKE_KEY
+
+
+@pytest.fixture
+def anyio_backend():
+    """Async tests run on asyncio, the same loop the gateway uses."""
+    return "asyncio"
+
+
+@pytest.fixture
+def events(monkeypatch):
+    """Capture events instead of printing them. Returns the list they land in."""
+    captured: list[dict] = []
+    monkeypatch.setattr(core_client, "emit", lambda kind, **fields: captured.append({"kind": kind, **fields}))
+    return captured
+
+
+@pytest.fixture
+def mock_settings(tmp_path):
+    """One agent (openclaw) using the mock model: no network, no real key. State in a temp folder."""
+    return GatewaySettings(fake_keys={FAKE_KEY: "openclaw"}, mock=True, state_dir=tmp_path / "state")
