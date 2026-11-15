@@ -17,6 +17,7 @@ from collections import Counter
 from collections.abc import Callable
 from typing import Any, NoReturn
 
+import anyio
 from mcp.server.fastmcp import Context
 
 from core.firewall import core_client, injection, permissions, policy, secrets
@@ -123,7 +124,8 @@ class Guard:
                 self.refuse(agent, tool, path, session, "deny", denied.rule_id, denied.reason)
         if check is not None and tool in run.permissions.tools:
             try:
-                check()
+                # Off the event loop: web_fetch's check looks up DNS, which can take seconds.
+                await anyio.to_thread.run_sync(check)
             except Denied as denied:
                 self.refuse(agent, tool, path, session, "deny", denied.rule_id, denied.reason)
 
@@ -131,7 +133,9 @@ class Guard:
         if decision.kind == "deny":
             self.refuse(agent, tool, path, session, "deny", decision.rule_id, decision.reason)
         # Before asking the user anything: a call carrying a key is refused outright.
-        findings = secrets.scan(f"{path or ''}\n{outbound}", self.settings.real_keys(), self.settings.fake_keys)
+        # web_fetch passes the URL as both; scan it once so one key isn't reported twice.
+        scanned = outbound if path == outbound else f"{path or ''}\n{outbound}"
+        findings = secrets.scan(scanned, self.settings.real_keys(), self.settings.fake_keys)
         if findings:
             theft = any(finding.kind == "fake_key" for finding in findings)
             found = ", ".join(f"{finding.kind} ({finding.preview})" for finding in findings)
@@ -155,6 +159,8 @@ class Guard:
                 result = await result
         except Denied as denied:
             self.refuse(agent, tool, path, session, "deny", denied.rule_id, denied.reason, **extra)
+        except Exception as error:  # noqa: BLE001 - every call still gets its one event
+            self.refuse(agent, tool, path, session, "deny", "tool_failed", f"the tool failed ({type(error).__name__})")
         if isinstance(result, Untrusted):
             # Rule of Two: from now on, sends and writes in this session need the user.
             session.mark_untrusted()
@@ -175,7 +181,9 @@ class Guard:
             session.raise_label(from_contract(target.access.label))
             # Mark Confidential text so the model proxy can ask before it goes to a cloud model.
             if target.access.label == "confidential" and self.confidential is not None:
-                text = self.confidential.mark(session.id, path, text)
+                # One name per file however the agent spelled the path, so one file gets one question.
+                file = f"{target.folder}/{target.path.relative_to(target.base).as_posix()}"
+                text = self.confidential.mark(session.id, file, text)
         self.record(agent, tool, path, session, outcome, decision.rule_id, decision.reason, counts, **extra)
         return text
 
@@ -253,6 +261,8 @@ class Guard:
         vault replaced, by kind (counts only: the values never go into events).
         """
         label = str(session.label) if session else "public"
+        if session is not None:
+            self.sessions.save(session)
         core_client.emit(
             "tool_call",
             agent=agent,

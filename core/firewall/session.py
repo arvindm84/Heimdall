@@ -1,12 +1,16 @@
 """Per-agent session state for one run of the agent.
 
 B's agent manager writes a fresh run_id every time it opens an agent; a new
-run_id starts a fresh session. Sessions live in memory, so a gateway restart also
-resets them (a known limit until the vault brings SQLite in Step 2).
+run_id starts a fresh session. With a database path, each session's label, untrusted
+flag and delimiter are also kept in SQLite: the manager recreates the gateway when
+folder mounts change (opening a second agent), and a running agent must not come
+back as Public and trusted.
 """
 
 import secrets
+import sqlite3
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from core.firewall.labels import Label, join
 
@@ -35,15 +39,52 @@ class Session:
 
 
 class Sessions:
-    """The current session of each agent."""
+    """The current session of each agent.
 
-    def __init__(self) -> None:
+    path: the SQLite file to keep sessions in across restarts; None keeps them in memory only (tests).
+    """
+
+    def __init__(self, path: Path | None = None) -> None:
         self._by_agent: dict[str, Session] = {}
+        self.path = path
+        self._db: sqlite3.Connection | None = None
+
+    def db(self) -> sqlite3.Connection | None:
+        if self.path is not None and self._db is None:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            self._db = sqlite3.connect(self.path, check_same_thread=False)
+            with self._db:
+                self._db.execute(
+                    "CREATE TABLE IF NOT EXISTS sessions ("
+                    " id TEXT PRIMARY KEY, label INTEGER NOT NULL, untrusted INTEGER NOT NULL, delimiter TEXT NOT NULL)"
+                )
+        return self._db
 
     def for_run(self, agent: str, run_id: str) -> Session:
-        """This agent's session, starting a fresh one if the run changed."""
+        """This agent's session, starting a fresh one if the run changed (or picking it up after a restart)."""
         session = self._by_agent.get(agent)
         if session is None or session.run_id != run_id:
-            session = Session(agent=agent, run_id=run_id)
+            session = self.load(agent, run_id) or Session(agent=agent, run_id=run_id)
             self._by_agent[agent] = session
         return session
+
+    def load(self, agent: str, run_id: str) -> Session | None:
+        db = self.db()
+        if db is None:
+            return None
+        row = db.execute(
+            "SELECT label, untrusted, delimiter FROM sessions WHERE id = ?", (f"{agent}:{run_id}",)
+        ).fetchone()
+        if row is None:
+            return None
+        return Session(agent=agent, run_id=run_id, label=Label(row[0]), untrusted=bool(row[1]), delimiter=row[2])
+
+    def save(self, session: Session) -> None:
+        """Keep this session's state; the guard calls it after every tool call."""
+        db = self.db()
+        if db is not None:
+            with db:
+                db.execute(
+                    "INSERT OR REPLACE INTO sessions VALUES (?, ?, ?, ?)",
+                    (session.id, int(session.label), int(session.untrusted), session.delimiter),
+                )

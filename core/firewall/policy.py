@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 from core.contracts.agents import AgentPermissions, FolderAccess
-from core.firewall.labels import Label
+from core.firewall.labels import Label, from_contract
 from core.firewall.permissions import folder_name
 from core.firewall.session import Session
 
@@ -50,6 +50,12 @@ def decide(
         name = folder_name(access.path)
         if not access.write:
             return Decision("deny", "folder_read_only", f"folder {name} is read only")
+        # Writing down a label: the copy would come back at the folder's lower label in a later run.
+        folder_label = from_contract(access.label)
+        if session.label > folder_label:
+            ask = "consent" if session.label >= Label.CONFIDENTIAL else "approval"
+            reason = f"this session holds {session.label} data and folder {name} is {folder_label}"
+            return Decision("ask", "write_to_lower_label", reason, ask=ask)
         # Untrusted text (an email, a web page) may carry injected instructions, so a
         # write after reading it needs the user (Rule of Two, lethal trifecta).
         if session.untrusted:

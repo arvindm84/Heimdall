@@ -74,3 +74,25 @@ def test_send_after_confidential_read_is_a_consent_question():
 def test_fetch_after_confidential_read_is_a_consent_question():
     decision = decide("web_fetch", AgentPermissions(tools=["web_fetch"]), confidential(), None, "https://example.com")
     assert (decision.kind, decision.rule_id, decision.ask) == ("ask", "fetch_with_confidential", "consent")
+
+
+PUBLIC_OUT = FolderAccess(path="/home/user/public", label="public", write=True)
+PRIVATE_OUT = FolderAccess(path="/home/user/out", label="private", write=True)
+
+
+def test_confidential_data_into_a_lower_folder_needs_consent():
+    decision = decide("files_write", ALL_TOOLS, confidential(), PRIVATE_OUT)
+    assert (decision.kind, decision.rule_id, decision.ask) == ("ask", "write_to_lower_label", "consent")
+
+
+def test_private_data_into_a_public_folder_needs_approval():
+    session = fresh()
+    session.raise_label(Label.PRIVATE)
+    decision = decide("files_write", ALL_TOOLS, session, PUBLIC_OUT)
+    assert (decision.kind, decision.rule_id, decision.ask) == ("ask", "write_to_lower_label", "approval")
+
+
+def test_writing_at_the_same_label_is_allowed():
+    session = fresh()
+    session.raise_label(Label.PRIVATE)
+    assert decide("files_write", ALL_TOOLS, session, PRIVATE_OUT).rule_id == "files_write_allowed"

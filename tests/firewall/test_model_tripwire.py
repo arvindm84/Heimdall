@@ -8,7 +8,7 @@ from starlette.testclient import TestClient
 
 from core.firewall.config import GatewaySettings
 from core.gateway import build_gateway
-from tests.firewall.helpers import FAKE_KEY
+from tests.firewall.helpers import FAKE_KEY, opened
 
 GEMINI_KEY = "AIzaRealGatewayKeyForTestsOnly0123456789ab"
 AS_OPENCLAW = {"authorization": f"Bearer {FAKE_KEY}"}
@@ -34,7 +34,7 @@ def client(transport, mock=False):
     settings = GatewaySettings(
         fake_keys={FAKE_KEY: "openclaw", "sk-fake-hermes-01": "hermes"}, gemini_key=GEMINI_KEY, mock=mock
     )
-    return TestClient(build_gateway(settings, transport=transport).streamable_http_app())
+    return TestClient(build_gateway(opened(settings), transport=transport).streamable_http_app())
 
 
 @pytest.mark.parametrize(

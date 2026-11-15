@@ -62,7 +62,7 @@ Events are JSON lines on stdout with a `kind` field, the same format as B's fake
 | Tool | Rule |
 |---|---|
 | `files_list`, `files_read` | Allow if the folder is in the agent's permissions. Result label = folder label |
-| `files_write` | Folder must be writable for this agent. Ask for approval if the session has read untrusted content |
+| `files_write` | Folder must be writable for this agent. Ask if the session holds data above the folder's label (consent if Confidential), or has read untrusted content |
 | `gmail_read` | Allow if the tool is enabled. Marks the session untrusted. Sanitized |
 | `gmail_draft` | Allow. Placeholders stay as placeholders |
 | `gmail_send` | Always ask. The pop-up shows the final recipient and body after placeholders are filled in. Consent as well if the session label is Confidential |
@@ -75,7 +75,7 @@ Placeholders are filled in only at `gmail_send`, only after approval, and only f
 
 Agents point their provider base URL at `http://gateway:8080/model`. For each request:
 
-1. Identify the agent by the fake key in `x-api-key` or `Authorization`. Missing or unknown: 401, emit `model_blocked`. Emit `model_call` (fake key, model, tools offered).
+1. Identify the agent by the fake key in `x-api-key` or `Authorization`. Missing or unknown: 401, emit `model_blocked`. Emit `model_call` (fake key, model, tools offered). An agent with no readable `permissions.json` for that key gets 403 (`no_permissions`), as tool calls do.
 2. Only the messages path is forwarded (`v1/messages`; OpenAI `chat/completions` when Hermes arrives). Other paths get a harmless stub (`{"data": []}`), as the fake gateway does.
 3. Fake key anywhere except the auth header: block, emit `key_theft_attempt`.
 4. Scan the body: exact match against the real keys the gateway holds, provider key formats, `.env`-shaped blocks. Block on a hit.

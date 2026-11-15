@@ -22,6 +22,6 @@ def events(monkeypatch):
 
 
 @pytest.fixture
-def mock_settings():
-    """One agent (openclaw) using the mock model: no network, no real key."""
-    return GatewaySettings(fake_keys={FAKE_KEY: "openclaw"}, mock=True)
+def mock_settings(tmp_path):
+    """One agent (openclaw) using the mock model: no network, no real key. State in a temp folder."""
+    return GatewaySettings(fake_keys={FAKE_KEY: "openclaw"}, mock=True, state_dir=tmp_path / "state")

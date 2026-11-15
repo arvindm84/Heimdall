@@ -25,3 +25,21 @@ def test_new_run_starts_a_fresh_session():
 def test_agents_have_separate_sessions():
     sessions = Sessions()
     assert sessions.for_run("openclaw", "run-1") is not sessions.for_run("hermes", "run-1")
+
+
+def test_a_restarted_gateway_picks_the_session_back_up(tmp_path):
+    before = Sessions(tmp_path / "gateway.db")
+    session = before.for_run("openclaw", "run-1")
+    session.raise_label(Label.CONFIDENTIAL)
+    session.mark_untrusted()
+    before.save(session)
+    after = Sessions(tmp_path / "gateway.db").for_run("openclaw", "run-1")  # a new process
+    assert (after.label, after.untrusted, after.delimiter) == (Label.CONFIDENTIAL, True, session.delimiter)
+
+
+def test_a_new_run_after_a_restart_still_starts_clean(tmp_path):
+    before = Sessions(tmp_path / "gateway.db")
+    session = before.for_run("openclaw", "run-1")
+    session.mark_untrusted()
+    before.save(session)
+    assert Sessions(tmp_path / "gateway.db").for_run("openclaw", "run-2").untrusted is False
