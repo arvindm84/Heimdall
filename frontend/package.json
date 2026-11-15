@@ -4,8 +4,8 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "setup": "npm install && python3 -m pip install -r ../backend/requirements.txt",
-    "dev": "concurrently -n web,api -c cyan,magenta \"vite\" \"python3 ../backend/app.py\"",
+    "setup": "npm install && cd .. && uv sync",
+    "dev": "concurrently -n web,api -c cyan,magenta \"vite\" \"cd .. && uv run python -m backend.app\"",
     "dev:web": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview"

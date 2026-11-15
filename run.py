@@ -1,6 +1,6 @@
 """Start Heimdall as a desktop app.
 
-    python run.py
+    uv run python run.py      (from the repo root)
 
 1. Starts the Flask back end on 127.0.0.1:8765 (debug off), in the background.
 2. Opens a native window (pywebview) showing the UI that Flask serves.
@@ -14,14 +14,10 @@ import sys
 import threading
 import time
 import urllib.request
-from pathlib import Path
 
-# app.py imports `services` as a top-level package, so put backend/ on the import path.
-sys.path.insert(0, str(Path(__file__).resolve().parent / "backend"))
+import webview  # pywebview
 
-import webview  # noqa: E402  (pywebview)
-
-from app import FRONTEND_DIST, PORT, app  # noqa: E402
+from backend.app import FRONTEND_DIST, PORT, app
 
 URL = f"http://127.0.0.1:{PORT}/"
 

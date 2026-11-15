@@ -1,0 +1,23 @@
+name: heimdall
+
+include:
+  - ../gateway/compose.yaml
+
+services:
+  openclaw:
+    build: .
+    networks: [agents-net]
+    depends_on: [gateway]
+    environment:
+      HEIMDALL_CHAT_TOKEN: ${HEIMDALL_OPENCLAW_TOKEN:-dev-token-change-me}
+    volumes:
+      - ${HEIMDALL_OPENCLAW_CONFIG:-./config.json}:/config/config.json:ro
+      - ${HEIMDALL_OPENCLAW_SKILLS:-../../data/agents/openclaw/skills}:/opt/heimdall/skills:ro
+
+  openclaw-ui:
+    image: alpine/socat:1.8.0.3
+    networks: [agents-net, outside]
+    depends_on: [openclaw]
+    command: TCP-LISTEN:7681,fork,reuseaddr TCP:openclaw:7681
+    ports:
+      - "127.0.0.1:7681:7681"

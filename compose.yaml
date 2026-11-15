@@ -1,0 +1,5 @@
+name: heimdall
+
+include:
+  - agents/openclaw/compose.yaml
+  - agents/hermes/compose.yaml
