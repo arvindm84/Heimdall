@@ -39,4 +39,4 @@ async def test_tools_use_underscore_names(mock_settings):
     # The Claude API rejects dots in tool names, so files.read would break agents.
     gateway = build_gateway(mock_settings)
     names = {tool.name for tool in await gateway.list_tools()}
-    assert names == {"files_list", "files_read", "files_write"}
+    assert names == {"files_list", "files_read", "files_write", "gmail_read", "gmail_draft", "gmail_send", "web_fetch"}

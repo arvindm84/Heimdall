@@ -29,6 +29,8 @@ What changed for you with the real gateway:
 
 - Done on the firewall side: `agents/gateway/compose.yaml` now has a named volume, `gateway-state`, mounted at `/state` in the gateway only. It holds the placeholder vault, which has real personal data, so never mount it into an agent. `docker compose down -v` wipes it.
 
+- Also on the firewall side (Step 4): `agents/gateway/compose.yaml` mounts the made-up inbox `tests/firewall/fixtures/inbox` read-only at `/data/inbox`, for `gmail_read` in fixture mode. It moves to D's `attacks/` once the demo attack email lives there.
+
 ## Later
 
 - Firewall Step 4 (Gmail): mount `data/credentials.json` and `data/token.json` read-only into the gateway.

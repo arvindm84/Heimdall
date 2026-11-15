@@ -26,3 +26,6 @@ services:
       # (data/gateway/compose.folders.yaml) at /data/folders/<name>.
       - ../../data/agents:/config/agents:ro
       - gateway-state:/state
+      # Made-up inbox for gmail_read in fixture mode (scene 3, offline). Move to D's attacks/
+      # once the demo attack email lives there.
+      - ../../tests/firewall/fixtures/inbox:/data/inbox:ro
