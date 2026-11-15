@@ -1,32 +1,5 @@
 name: heimdall
 
-networks:
-  agents-net:
-    internal: true
-  outside: {}
-
-services:
-  gateway:
-    build: images/fake-gateway
-    networks: [agents-net, outside]
-    env_file:
-      - path: .env
-        required: false
-
-  openclaw:
-    build: images/openclaw
-    networks: [agents-net]
-    depends_on: [gateway]
-    environment:
-      HEIMDALL_CHAT_TOKEN: ${HEIMDALL_CHAT_TOKEN:-dev-token-change-me}
-      HEIMDALL_FAKE_KEY: sk-fake-openclaw-01
-    volumes:
-      - ${HEIMDALL_OPENCLAW_CONFIG:-./images/openclaw/openclaw.json}:/config/openclaw.json:ro
-
-  openclaw-ui:
-    image: alpine/socat:1.8.0.3
-    networks: [agents-net, outside]
-    depends_on: [openclaw]
-    command: TCP-LISTEN:7681,fork,reuseaddr TCP:openclaw:7681
-    ports:
-      - "127.0.0.1:7681:7681"
+include:
+  - agents/openclaw/compose.yaml
+  - agents/hermes/compose.yaml

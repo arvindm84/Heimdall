@@ -11,7 +11,7 @@ RUN case "$TARGETARCH" in \
       "https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd.$arch" \
  && chmod 755 /usr/local/bin/ttyd
 COPY --chmod=755 start.sh /usr/local/bin/heimdall-start
-COPY workspace /opt/heimdall/workspace
+COPY instructions.md /opt/heimdall/workspace/AGENTS.md
 USER node
 EXPOSE 7681
 ENTRYPOINT ["tini", "-s", "--", "heimdall-start"]

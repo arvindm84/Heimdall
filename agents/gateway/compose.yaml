@@ -1,0 +1,22 @@
+name: heimdall
+
+networks:
+  agents-net:
+    internal: true
+  outside: {}
+
+services:
+  gateway:
+    # Stand-in with the same port and paths as A's gateway. To switch to A's:
+    #   build: { context: ../.., dockerfile: images/gateway/Dockerfile }
+    build: .
+    networks: [agents-net, outside]
+    env_file:
+      - path: ../../.env
+        required: false
+    environment:
+      HEIMDALL_FAKE_KEYS: openclaw:sk-fake-openclaw-01,hermes:sk-fake-hermes-01
+    volumes:
+      # Each agent's permissions.json. User folders are added by the agent manager
+      # (data/gateway/compose.folders.yaml) at /data/folders/<name>.
+      - ../../data/agents:/config/agents:ro

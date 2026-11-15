@@ -13,4 +13,6 @@ default-groups = ["dev", "gateway"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
+testpaths = ["agents", "tests"]
+addopts = "--import-mode=importlib"
 markers = ["docker: needs Docker running; starts real containers"]
