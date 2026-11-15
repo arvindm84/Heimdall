@@ -1,0 +1,8 @@
+# Images are built from the repo root. Keep keys and local data out of the build context.
+.env
+.env.*
+!.env.example
+data/
+.venv/
+.git/
+**/__pycache__/
