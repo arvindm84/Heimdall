@@ -1,8 +1,9 @@
 """Reads an agent's permissions.json, which B's agent manager writes when it opens the agent.
 
-Shape: {"run_id": "...", "fake_key": "...", "provider": "gemini", "permissions": AgentPermissions}.
-"provider" is the model provider the user chose ("gemini", "anthropic" or "local");
-when present, the model proxy refuses calls to any other cloud provider.
+Shape: {"run_id": "...", "fake_key": "...", "provider": "gemini", "model": "...", "permissions": AgentPermissions}.
+"provider" is the model provider the user chose ("gemini", "anthropic" or "local") and
+"model" the model; when present, the model proxy refuses calls to any other cloud
+provider, or to another model at the chosen provider.
 Read on every tool call: the file is small, and a reopen (new permissions, new
 run_id) takes effect at once.
 """
@@ -30,6 +31,7 @@ class AgentRun:
     run_id: str
     permissions: AgentPermissions
     provider: str | None = None
+    model: str | None = None
 
 
 def load(agents_dir: Path, agent: str, key: str) -> AgentRun:
@@ -39,9 +41,9 @@ def load(agents_dir: Path, agent: str, key: str) -> AgentRun:
         stored = json.loads(path.read_text(encoding="utf-8"))
         permissions = AgentPermissions.model_validate(stored["permissions"])
         run_id, fake_key = str(stored["run_id"]), stored["fake_key"]
-        provider = stored.get("provider")
-        if provider is not None and not isinstance(provider, str):
-            raise TypeError("provider must be a string")
+        provider, model = stored.get("provider"), stored.get("model")
+        if any(value is not None and not isinstance(value, str) for value in (provider, model)):
+            raise TypeError("provider and model must be strings")
     except FileNotFoundError as error:
         raise NoPermissions(f"no permissions file for {agent}") from error
     except (OSError, ValueError, KeyError, TypeError, ValidationError) as error:
@@ -49,7 +51,7 @@ def load(agents_dir: Path, agent: str, key: str) -> AgentRun:
     # A second check on identity: the key on the call must be the one the manager gave this agent.
     if fake_key != key:
         raise NoPermissions(f"permissions file for {agent} names a different key")
-    return AgentRun(agent=agent, run_id=run_id, permissions=permissions, provider=provider)
+    return AgentRun(agent=agent, run_id=run_id, permissions=permissions, provider=provider, model=model)
 
 
 def folder_name(host_path: str) -> str:

@@ -278,11 +278,12 @@ def test_markers_from_another_session_count_for_nothing(tmp_path):
 # ---------- only the provider the user chose ----------
 
 
-def choose(settings, provider: str) -> None:
-    """Add the user's provider choice to openclaw's permissions.json, as B's manager would."""
+def choose(settings, provider: str, model: str | None = None) -> None:
+    """Add the user's provider (and model) choice to openclaw's permissions.json, as B's manager would."""
     path = settings.agents_dir / "openclaw" / "permissions.json"
     stored = json.loads(path.read_text(encoding="utf-8"))
-    path.write_text(json.dumps({**stored, "provider": provider}), encoding="utf-8")
+    choice = {"provider": provider} | ({"model": model} if model else {})
+    path.write_text(json.dumps({**stored, **choice}), encoding="utf-8")
 
 
 @pytest.mark.parametrize(
@@ -306,6 +307,29 @@ async def test_only_the_chosen_provider_is_reached(world, asked, events, chosen,
     if not allowed:
         [blocked] = [e for e in events if e["kind"] == "model_blocked"]
         assert blocked["rule_id"] == "provider_not_chosen"
+
+
+@pytest.mark.parametrize(
+    "sent, allowed",
+    [("gemini-flash-lite-latest", True), ("models/gemini-flash-lite-latest", True), ("gemini-2.5-pro", False)],
+)
+async def test_only_the_chosen_model_is_reached(world, asked, events, sent, allowed):
+    settings, gateway, seen, sessions = world
+    choose(settings, "gemini", "gemini-flash-lite-latest")
+    response = await post(gateway, "chat/completions", {**openai_request("hi"), "model": sent})
+    assert (response.status_code != 403) is allowed
+    assert bool(seen) is allowed
+    if not allowed:
+        [blocked] = [e for e in events if e["kind"] == "model_blocked"]
+        assert blocked["rule_id"] == "model_not_chosen"
+
+
+async def test_the_model_check_leaves_the_local_model_alone(world, asked):
+    # Chose Gemini, but the local model is always allowed, whatever its name.
+    settings, gateway, seen, sessions = world
+    choose(settings, "gemini", "gemini-flash-lite-latest")
+    response = await post(gateway, "local/chat/completions", {**openai_request("hi"), "model": "llama3.2:3b"})
+    assert response.status_code == 200
 
 
 async def test_no_provider_in_permissions_keeps_the_old_behaviour(world, asked):

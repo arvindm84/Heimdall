@@ -52,8 +52,13 @@ def gateway_folder_mounts(permission_sets: list[AgentPermissions]) -> list[dict]
     return list(mounts.values())
 
 
-def write_permissions(agent: str, permissions: AgentPermissions) -> None:
-    """What the gateway reads: this agent's permissions.json, and the folder mounts for all agents."""
+def write_permissions(
+    agent: str, permissions: AgentPermissions, provider: str | None = None, model: str | None = None
+) -> None:
+    """What the gateway reads: this agent's permissions.json, and the folder mounts for all agents.
+
+    provider, model: the user's choice. The gateway refuses model calls to any other.
+    """
     others = [
         AgentPermissions(**json.loads(path.read_text(encoding="utf-8"))["permissions"])
         for path in AGENTS_DIR.glob("*/permissions.json")
@@ -78,6 +83,10 @@ def write_permissions(agent: str, permissions: AgentPermissions) -> None:
         "fake_key": profile(agent).FAKE_KEY,
         "permissions": permissions.model_copy(update={"folders": resolved}).model_dump(),
     }
+    if provider:
+        content["provider"] = provider
+    if model:
+        content["model"] = model
     _write_json(AGENTS_DIR / agent / "permissions.json", content)
     _write_json(FOLDER_MOUNTS, {"services": {"gateway": {"volumes": mounts}}})
 
@@ -88,9 +97,10 @@ def open_agent(
     module = profile(agent)
     if provider not in PROVIDERS:
         raise ValueError(f"unknown provider: {provider}")
+    model = model or PROVIDERS[provider]
     config_path = AGENTS_DIR / agent / "config.json"
-    _write_json(config_path, module.build_config(permissions, provider, model or PROVIDERS[provider]))
-    write_permissions(agent, permissions)
+    _write_json(config_path, module.build_config(permissions, provider, model))
+    write_permissions(agent, permissions, provider, model)
     token = secrets.token_urlsafe(24)
     env = {
         f"HEIMDALL_{agent.upper()}_TOKEN": token,

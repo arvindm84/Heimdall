@@ -150,6 +150,12 @@ def make_model_route(
             reason = f"the user chose {chosen} for this agent, not {provider_id(path)}"
             core_client.emit("model_blocked", agent=agent, path=path, rule_id="provider_not_chosen", reason=reason)
             return JSONResponse({"error": f"Heimdall blocked this request: {reason}"}, status_code=403)
+        # And only the model the user chose there (the local model when the user chose another provider is free).
+        sent = str(body.get("model") or "").removeprefix("models/")
+        if run.model and provider_id(path) == chosen and sent != run.model:
+            reason = f"the user chose the model {run.model} for this agent, not {sent or 'none'}"
+            core_client.emit("model_blocked", agent=agent, path=path, rule_id="model_not_chosen", reason=reason)
+            return JSONResponse({"error": f"Heimdall blocked this request: {reason}"}, status_code=403)
         if not local and consent is not None and sessions is not None:
             await withhold_denied(body, agent, run, path, consent, sessions)
         if settings.mock:
