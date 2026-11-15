@@ -11,11 +11,11 @@ export default function QuestionCard({ q }: { q: Question }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const answer = async (decision: "approve" | "deny") => {
+  const answer = async (decision: "approve" | "deny", scope?: "once" | "folder") => {
     setBusy(true);
     setError(null);
     try {
-      await api.respond(q.request_id, decision);
+      await api.respond(q.request_id, decision, scope);
     } catch (e) {
       // 404: the agent stopped waiting (2 minutes passed), which counted as a deny.
       setError(e instanceof ApiError ? e.message : String(e));
@@ -62,13 +62,23 @@ export default function QuestionCard({ q }: { q: Question }) {
         >
           Deny
         </button>
+        {/* A file going to a model: allow this file, or every file in its folder.
+            Either lasts until the agent is opened again (core/proxy/consent.py). */}
+        {consent && q.file && q.folder && (
+          <button
+            disabled={busy}
+            onClick={() => answer("approve", "folder")}
+            className="rounded border border-rule px-4 py-2 text-sm transition-colors hover:border-paper disabled:opacity-50"
+          >
+            Always for {q.folder}
+          </button>
+        )}
         <button
           disabled={busy}
-          onClick={() => answer("approve")}
+          onClick={() => (consent && q.file ? answer("approve", "once") : answer("approve"))}
           className="rounded bg-paper px-4 py-2 text-sm font-bold text-ground hover:opacity-90 disabled:opacity-50"
         >
-          {/* An approve lasts for this agent's run (the gateway remembers consent per file). */}
-          {consent ? "Allow for this session" : q.tool === "gmail_send" ? "Send it" : "Allow"}
+          {consent && q.file ? "Allow this file" : consent ? "Allow" : q.tool === "gmail_send" ? "Send it" : "Allow"}
         </button>
       </div>
     </div>

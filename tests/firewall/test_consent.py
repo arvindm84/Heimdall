@@ -48,6 +48,7 @@ def asked(monkeypatch):
 
     class Asked(list):
         answer = "approve"
+        scope = None
 
     record = Asked()
 
@@ -55,7 +56,12 @@ def asked(monkeypatch):
         record.append((kind, details, question))
         return record.answer
 
+    async def fake_answer(kind, agent, question, details):
+        record.append((kind, details, question))
+        return core_client.Answer(record.answer, record.scope if record.answer == "approve" else None)
+
     monkeypatch.setattr(core_client, "ask", fake_ask)
+    monkeypatch.setattr(core_client, "answer", fake_answer)
     return record
 
 
@@ -215,11 +221,11 @@ async def test_failed_ask_is_a_remembered_deny(world, monkeypatch, events):
     settings, gateway, seen, sessions = world
     calls = []
 
-    async def broken_ask(kind, agent, question, details):
+    async def broken_answer(kind, agent, question, details):
         calls.append(kind)
         raise RuntimeError("core down")
 
-    monkeypatch.setattr(core_client, "ask", broken_ask)
+    monkeypatch.setattr(core_client, "answer", broken_answer)
     result = await read(gateway)
     await post(gateway, "chat/completions", openai_request(result))
     await post(gateway, "chat/completions", openai_request(result))
@@ -335,6 +341,37 @@ async def test_the_model_check_leaves_the_local_model_alone(world, asked):
 async def test_no_provider_in_permissions_keeps_the_old_behaviour(world, asked):
     settings, gateway, seen, sessions = world
     assert (await post(gateway, "v1/messages", anthropic_request("hi"))).status_code == 200
+
+
+# ---------- allow this file, or the whole folder ----------
+
+
+async def two_files(settings, gateway) -> tuple[str, str]:
+    (settings.folders_dir / "taxes" / "w2.txt").write_text("Made-up W-2. Wages: 64,000.\n", encoding="utf-8")
+    return await read(gateway, "taxes/return.txt"), await read(gateway, "taxes/w2.txt")
+
+
+@pytest.mark.parametrize("scope, questions", [("folder", 1), ("once", 2), (None, 2)])
+async def test_always_for_this_folder_covers_its_other_files(world, asked, scope, questions):
+    settings, gateway, seen, sessions = world
+    asked.scope = scope
+    first, second = await two_files(settings, gateway)
+    await post(gateway, "chat/completions", openai_request(first))
+    await post(gateway, "chat/completions", openai_request(second))
+    assert len(asked) == questions
+    assert WITHHELD not in json.dumps(json.loads(seen[-1].content))
+
+
+async def test_allowing_a_folder_does_not_allow_another_agent_run(world, asked):
+    settings, gateway, seen, sessions = world
+    asked.scope = "folder"
+    first = await read(gateway)
+    await post(gateway, "chat/completions", openai_request(first))
+    write_permissions(settings.agents_dir, AgentPermissions(tools=["files_read"], folders=[
+        FolderAccess(path="/x/taxes", label="confidential")]), run_id="run-2")  # fmt: skip
+    again = await read(gateway)
+    await post(gateway, "chat/completions", openai_request(again))
+    assert len(asked) == 2
 
 
 async def test_one_file_spelled_two_ways_is_asked_about_once(world, asked):

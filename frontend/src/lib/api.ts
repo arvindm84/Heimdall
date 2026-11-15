@@ -62,6 +62,7 @@ export const api = {
   stop: (agent: string) => call<{ status: string }>("/stop", { agent }),
   kill: (agent: string) => call<{ status: string }>("/kill", { agent }),
   // The user's answer to a firewall question. 404 if it already timed out.
-  respond: (request_id: string, decision: "approve" | "deny") =>
-    call<{ status: string }>("/response", { request_id, decision }),
+  // scope, only with an approve on a consent question: "once" (this file) or "folder" (every file in it).
+  respond: (request_id: string, decision: "approve" | "deny", scope?: "once" | "folder") =>
+    call<{ status: string }>("/response", scope ? { request_id, decision, scope } : { request_id, decision }),
 };

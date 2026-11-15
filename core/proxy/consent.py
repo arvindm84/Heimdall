@@ -3,7 +3,8 @@
 The model proxy runs this on every request to a cloud provider. It finds the
 tool-result blocks holding text the gateway served from a Confidential folder in
 this session (core/firewall/confidential.py), asks the user once per file per
-session, and on deny replaces those blocks with a short note. The request is still
+session, and on deny replaces those blocks with a short note. The user can allow one
+file ("once") or every file in its folder ("folder"); both last for this agent's run. The request is still
 forwarded and stays valid: every tool call keeps its tool result, only the text
 inside changes. Requests to the local model skip this: nothing leaves the machine.
 """
@@ -63,26 +64,40 @@ class Consent:
         files = sorted(set().union(*(held for _, held in holders)))
         async with self.locks[session]:
             for file in files:
-                if self.store.decision(session, file) is None:
-                    self.store.record(session, file, await self.ask(agent, file, provider))
-        denied = {file for file in files if self.store.decision(session, file) != "approve"}
+                if self.decision(session, file) is None:
+                    decision, scope = await self.ask(agent, file, provider)
+                    # "Always for this folder": one answer for every file in it, for this run.
+                    self.store.record(session, folder_key(file) if scope == "folder" else file, decision)
+        denied = {file for file in files if self.decision(session, file) != "approve"}
         for block, held in holders:
             if held & denied:
                 block["content"] = WITHHELD
         return sorted(denied)
 
-    async def ask(self, agent: str, file: str, provider: str) -> str:
-        """Ask the user once. A failed ask is a deny, and is remembered like one, so a
-        missing back end doesn't make every model call wait for a timeout."""
-        question = (
-            f"{agent} wants to send text from the Confidential file {file} to {provider}. "
-            "Allow it for this session?"
-        )
-        details = {"file": file, "folder": file.split("/", 1)[0], "provider": provider}
+    def decision(self, session: str, file: str) -> str | None:
+        """This file's answer, or its folder's, or None if the user hasn't been asked."""
+        return self.store.decision(session, file) or self.store.decision(session, folder_key(file))
+
+    async def ask(self, agent: str, file: str, provider: str) -> tuple[str, str | None]:
+        """Ask the user once. Returns (decision, scope). A failed ask is a deny, and is
+        remembered like one, so a missing back end doesn't make every model call wait."""
+        question = f"{agent} wants to send text from the Confidential file {file} to {provider}."
+        details = {"file": file, "folder": folder_of(file), "provider": provider}
         try:
-            answer = await core_client.ask("consent", agent, question, details)
+            answer = await core_client.answer("consent", agent, question, details)
         except Exception:  # noqa: BLE001 - fail closed on any error while asking
-            answer = "deny"
-        decision = "approve" if answer == "approve" else "deny"
-        core_client.emit("consent", agent=agent, file=file, provider=provider, decision=decision)
-        return decision
+            answer = core_client.Answer("deny")
+        decision = "approve" if answer.decision == "approve" else "deny"
+        scope = answer.scope if decision == "approve" else None
+        core_client.emit("consent", agent=agent, file=file, provider=provider, decision=decision, scope=scope)
+        return decision, scope
+
+
+def folder_of(file: str) -> str:
+    """"taxes/2025/return.txt" -> "taxes": files are named <folder>/<path in it>."""
+    return file.split("/", 1)[0]
+
+
+def folder_key(file: str) -> str:
+    """Where a whole-folder answer is kept: "taxes/" can't be a file's name (a file has a path after the slash)."""
+    return f"{folder_of(file)}/"

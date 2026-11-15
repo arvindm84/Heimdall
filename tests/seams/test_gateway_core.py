@@ -123,6 +123,21 @@ async def test_consent_question_reaches_the_dashboard(core, tmp_path):
         assert await anyio.to_thread.run_sync(core_backend.answer, url, raised["request_id"], "deny") == 200
 
 
+async def test_always_for_this_folder_comes_back_to_the_gateway(core):
+    """The dashboard's "Always for this folder" reaches the gateway with its scope."""
+    url, _ = core
+    async with anyio.create_task_group() as tasks:
+        answers = []
+
+        async def gateway_asks():
+            answers.append(await core_client.answer("consent", "hermes", "q", {"file": "taxes/a.txt", "folder": "taxes"}))
+
+        tasks.start_soon(gateway_asks)
+        raised = await anyio.to_thread.run_sync(core_backend.Dashboard(url).next)
+        assert await anyio.to_thread.run_sync(core_backend.answer, url, raised["request_id"], "approve", "folder") == 200
+    assert answers == [core_client.Answer("approve", "folder")]
+
+
 async def test_a_reconnected_dashboard_still_gets_the_question(core, gateway):
     """A page reload mid-question: the new /api/events connection is sent what is still pending."""
     url, _ = core

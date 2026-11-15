@@ -51,6 +51,7 @@ class Dashboard:
             raise AssertionError(f"no question reached the dashboard in {timeout} s") from None
 
 
-def answer(url: str, request_id: str, decision: str) -> int:
-    """Click Approve or Deny on the dashboard. Returns the HTTP status."""
-    return httpx.post(f"{url}/api/response", json={"request_id": request_id, "decision": decision}).status_code
+def answer(url: str, request_id: str, decision: str, scope: str | None = None) -> int:
+    """Click Approve or Deny on the dashboard (with a consent scope: "once" or "folder"). Returns the HTTP status."""
+    body = {"request_id": request_id, "decision": decision} | ({"scope": scope} if scope else {})
+    return httpx.post(f"{url}/api/response", json=body).status_code

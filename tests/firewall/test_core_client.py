@@ -20,6 +20,23 @@ async def ask_with(handler) -> str:
     )
 
 
+@pytest.mark.parametrize(
+    "reply, expected",
+    [
+        ({"decision": "approve", "scope": "folder"}, ("approve", "folder")),
+        ({"decision": "approve", "scope": "once"}, ("approve", "once")),
+        ({"decision": "approve"}, ("approve", None)),
+        ({"decision": "approve", "scope": "forever"}, ("approve", None)),  # unknown scope: the narrowest answer
+        ({"decision": "deny", "scope": "folder"}, ("deny", None)),
+    ],
+)
+async def test_a_consent_answer_carries_its_scope(reply, expected, events):
+    answer = await core_client.answer(
+        "consent", "hermes", "q", {"file": "taxes/a.txt"}, transport=httpx.MockTransport(lambda r: httpx.Response(200, json=reply))
+    )
+    assert (answer.decision, answer.scope) == expected
+
+
 async def test_approve_is_passed_through(events):
     sent: list[dict] = []
 

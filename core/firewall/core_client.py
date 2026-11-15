@@ -12,6 +12,7 @@ import json
 import os
 import queue
 import threading
+from typing import NamedTuple
 
 import httpx
 
@@ -65,14 +66,33 @@ def _send_events(pending: queue.Queue) -> None:
                 pending.task_done()
 
 
+class Answer(NamedTuple):
+    """The user's answer. scope: with an approve on a consent question, "once" (this file)
+    or "folder" (every file in its folder); None otherwise."""
+
+    decision: str
+    scope: str | None = None
+
+
+SCOPES = ("once", "folder")
+
+
 async def ask(
     kind: str, agent: str, question: str, details: dict, transport: httpx.AsyncBaseTransport | None = None
 ) -> str:
-    """Ask the user through the core and wait. Returns "approve" or "deny".
+    """Ask the user through the core and wait. Returns "approve" or "deny"."""
+    return (await answer(kind, agent, question, details, transport)).decision
+
+
+async def answer(
+    kind: str, agent: str, question: str, details: dict, transport: httpx.AsyncBaseTransport | None = None
+) -> Answer:
+    """Ask the user through the core and wait for the whole answer.
 
     kind: "approval" or "consent". details: extra fields shown in the pop-up.
     transport: only for tests, to fake the back end.
     Fail closed: no back end, timeout, error status or an odd reply all mean "deny".
+    An unknown scope counts as none, the narrowest approve.
     """
     # Fixed fields go last so `details` can never change who is asking or what.
     body = {**details, "container_id": agent, "question": question, "kind": kind}
@@ -80,12 +100,13 @@ async def ask(
         async with httpx.AsyncClient(timeout=ASK_TIMEOUT_SECONDS, transport=transport) as client:
             response = await client.post(f"{CORE_URL}/api/raise", json=body)
             response.raise_for_status()
-            # ValueError: not JSON. KeyError/TypeError: JSON without a "decision" field.
-            decision = response.json()["decision"]
-    except (httpx.HTTPError, ValueError, KeyError, TypeError) as error:
+            # ValueError: not JSON. KeyError/TypeError/AttributeError: JSON without a "decision" field.
+            reply = response.json()
+            decision, scope = reply["decision"], reply.get("scope")
+    except (httpx.HTTPError, ValueError, KeyError, TypeError, AttributeError) as error:
         emit("ask_failed", agent=agent, ask_kind=kind, reason=f"{type(error).__name__}: {error}")
-        return "deny"
+        return Answer("deny")
     if decision not in ("approve", "deny"):
         emit("ask_failed", agent=agent, ask_kind=kind, reason=f"unexpected decision {decision!r}")
-        return "deny"
-    return decision
+        return Answer("deny")
+    return Answer(decision, scope if decision == "approve" and scope in SCOPES else None)
