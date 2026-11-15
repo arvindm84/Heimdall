@@ -1,13 +1,13 @@
-data/
+# Runtime state the agent manager writes (permissions, configs, staged skills).
+# Leading slash: only the top-level folder, not frontend/src/data/ (source code).
+/data/
 .venv/
 __pycache__/
 .env
 .python-version
+# Personal notes, not shared.
 plan.md
-project-plan.md
 .claude/skills/eyes/
 .claude/skills/frontend-design/
 docs/
-backend/__init__.py
-backend/test_routes.py
 postman/
