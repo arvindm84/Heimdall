@@ -17,10 +17,10 @@ def in_agent(agent: str, *command: str) -> str:
 
 
 def gateway_log(kind: str, agent: str) -> list[dict]:
-    """What the gateway recorded for this agent, identified by its fake key."""
+    """What the gateway recorded for this agent (it names the agent from its fake key)."""
     lines = manager.compose("logs", "--no-log-prefix", "gateway").splitlines()
     events = [json.loads(line) for line in lines if line.startswith('{"kind"')]
-    return [e for e in events if e["kind"] == kind and e.get("agent") == manager.profile(agent).FAKE_KEY]
+    return [e for e in events if e["kind"] == kind and e.get("agent") == agent]
 
 
 def ask(agent: str, message: str) -> list[dict]:
@@ -45,11 +45,14 @@ def check_sealed_and_routed(agent: str, opened) -> None:
     assert manager.chat_status(opened.chat_url, opened.chat_token) == 200
     assert manager.chat_status(opened.chat_url, "wrong-token") == 401
 
-    assert http_code(agent, "-m", "6", "--noproxy", "*", "https://example.com") == "000"
-    assert http_code(agent, "-m", "10", "https://example.com") in ("000", "403")
+    assert http_code(agent, "-m", "6", "https://example.com") == "000"
+    assert http_code(agent, "-m", "6", "http://gateway:8080/model/models") == "401"
 
     tools_before = len(gateway_log("tool_call", agent))
+    forwarded_before = len(gateway_log("model_forwarded", agent))
     model_calls = ask(agent, "Read notes.txt and tell me what it says.")
     tool_calls = gateway_log("tool_call", agent)[tools_before:]
-    assert model_calls and all(call["host"] == GEMINI_HOST for call in model_calls)
+    forwarded = gateway_log("model_forwarded", agent)[forwarded_before:]
+    assert model_calls and all(call["api_key"] == manager.profile(agent).FAKE_KEY for call in model_calls)
+    assert forwarded and all(call["url"].startswith(f"https://{GEMINI_HOST}/") for call in forwarded)
     assert any(call["tool"] == "files_read" for call in tool_calls)

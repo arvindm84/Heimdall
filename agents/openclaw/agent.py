@@ -3,14 +3,12 @@
 import json
 from pathlib import Path
 
-from agents.permissions import AgentPermissions
+from core.contracts.agents import AgentPermissions
 
 PORT = 7681
 FAKE_KEY = "sk-fake-openclaw-01"
-MODEL_API = {
-    "gemini": ("https://generativelanguage.googleapis.com/v1beta/openai", "openai-completions"),
-    "anthropic": ("https://api.anthropic.com", "anthropic-messages"),
-}
+# The API OpenClaw speaks to the gateway's /model route for each provider.
+MODEL_API = {"gemini": "openai-completions", "anthropic": "anthropic-messages"}
 
 
 def build_config(permissions: AgentPermissions, provider: str, model: str) -> dict:
@@ -18,7 +16,7 @@ def build_config(permissions: AgentPermissions, provider: str, model: str) -> di
         raise ValueError("openclaw does not support memory or delegation yet")
     config = json.loads((Path(__file__).parent / "config.json").read_text(encoding="utf-8"))
     entry = config["models"]["providers"]["heimdall"]
-    entry["baseUrl"], entry["api"] = MODEL_API[provider]
+    entry["api"] = MODEL_API[provider]
     entry["models"][0]["id"] = entry["models"][0]["name"] = model
     config["agents"]["defaults"]["model"]["primary"] = f"heimdall/{model}"
     config["tools"]["alsoAllow"] = [f"heimdall__{tool}" for tool in permissions.tools]

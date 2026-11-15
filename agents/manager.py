@@ -11,18 +11,17 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-from agents.permissions import AgentPermissions, OpenedAgent
+from agents import skills
+from core.contracts.agents import AgentPermissions, OpenedAgent
 
 ROOT = Path(__file__).resolve().parents[1]
-DATA_DIR = ROOT / "data"
-GATEWAY_CONFIG = DATA_DIR / "gateway" / "gateway.yaml"
+AGENTS_DIR = ROOT / "data" / "agents"
+# Compose override the manager writes: user folders mounted into the gateway.
+FOLDER_MOUNTS = ROOT / "data" / "gateway" / "compose.folders.yaml"
 CHAT_USER = "heimdall"
 AGENTS = ("openclaw", "hermes")
-# provider -> (host the gateway proxy allows, default model)
-PROVIDERS = {
-    "gemini": ("generativelanguage.googleapis.com", "gemini-flash-lite-latest"),
-    "anthropic": ("api.anthropic.com", "claude-haiku-4-5"),
-}
+# provider -> default model
+PROVIDERS = {"gemini": "gemini-flash-lite-latest", "anthropic": "claude-haiku-4-5"}
 
 
 def profile(agent: str):
@@ -32,24 +31,43 @@ def profile(agent: str):
     return importlib.import_module(f"agents.{agent}.agent")
 
 
-def build_gateway_config(current: dict, agent: str, permissions: AgentPermissions, provider: str) -> dict:
-    """The interim gateway.yaml the firewall reads: folders, agents, allowed provider hosts."""
-    folders = {folder["path"]: folder for folder in current.get("folders", [])}
-    for folder in permissions.folders:
-        folders[folder.path] = {"path": folder.path, "label": folder.label, "writable": folder.write}
-    entries = {entry["name"]: entry for entry in current.get("agents", [])}
-    entries[agent] = {
-        "name": agent,
+def gateway_folder_mounts(permission_sets: list[AgentPermissions]) -> list[dict]:
+    """Compose volumes that put every allowed folder in the gateway at /data/folders/<folder name>.
+
+    Agents never get these folders; they read files only through the gateway's tools.
+    """
+    mounts: dict[str, dict] = {}
+    for folder in (folder for permissions in permission_sets for folder in permissions.folders):
+        source = Path(folder.path).expanduser().resolve()
+        if not source.is_dir():
+            raise ValueError(f"not a folder: {folder.path}")
+        mount = mounts.setdefault(
+            source.name,
+            {"type": "bind", "source": str(source), "target": f"/data/folders/{source.name}", "read_only": True},
+        )
+        if mount["source"] != str(source):
+            raise ValueError(f"two allowed folders are both named {source.name}")
+        if folder.write:
+            mount["read_only"] = False
+    return list(mounts.values())
+
+
+def write_permissions(agent: str, permissions: AgentPermissions) -> None:
+    """What the gateway reads: this agent's permissions.json, and the folder mounts for all agents."""
+    others = [
+        AgentPermissions(**json.loads(path.read_text(encoding="utf-8"))["permissions"])
+        for path in AGENTS_DIR.glob("*/permissions.json")
+        if path.parent.name != agent
+    ]
+    mounts = gateway_folder_mounts([*others, permissions])
+    # A new run_id each open tells the gateway to start a fresh session for this agent.
+    content = {
+        "run_id": secrets.token_hex(8),
         "fake_key": profile(agent).FAKE_KEY,
-        "folders": [folder.path for folder in permissions.folders],
-        "tools": list(permissions.tools),
-        "provider": provider,
+        "permissions": permissions.model_dump(),
     }
-    return {
-        "providers": {"allow": [host for host, _ in PROVIDERS.values()]},
-        "folders": list(folders.values()),
-        "agents": list(entries.values()),
-    }
+    _write_json(AGENTS_DIR / agent / "permissions.json", content)
+    _write_json(FOLDER_MOUNTS, {"services": {"gateway": {"volumes": mounts}}})
 
 
 def open_agent(
@@ -58,16 +76,16 @@ def open_agent(
     module = profile(agent)
     if provider not in PROVIDERS:
         raise ValueError(f"unknown provider: {provider}")
-    model = model or PROVIDERS[provider][1]
-    config_path = DATA_DIR / "agents" / f"{agent}.json"
-    _write_json(config_path, module.build_config(permissions, provider, model))
-    current = json.loads(GATEWAY_CONFIG.read_text(encoding="utf-8")) if GATEWAY_CONFIG.exists() else {}
-    _write_json(GATEWAY_CONFIG, build_gateway_config(current, agent, permissions, provider))
+    config_path = AGENTS_DIR / agent / "config.json"
+    _write_json(config_path, module.build_config(permissions, provider, model or PROVIDERS[provider]))
+    write_permissions(agent, permissions)
     token = secrets.token_urlsafe(24)
     env = {
         f"HEIMDALL_{agent.upper()}_TOKEN": token,
         f"HEIMDALL_{agent.upper()}_CONFIG": str(config_path),
     }
+    if agent == "openclaw":
+        env["HEIMDALL_OPENCLAW_SKILLS"] = str(skills.stage(agent, permissions.skills))
     compose("up", "-d", "--build", "gateway", env=env)
     compose("up", "-d", "--build", "--no-deps", "--force-recreate", agent, f"{agent}-ui", env=env)
     opened = OpenedAgent(
@@ -88,6 +106,13 @@ def kill_agent(agent: str) -> None:
     compose("rm", "-f", agent, f"{agent}-ui")
 
 
+def memory(agent: str, *args: str) -> str:
+    """Hermes memory snapshots: memory(agent, "list" | "snapshot" | "rollback", [id])."""
+    if agent != "hermes":
+        raise ValueError(f"{agent} has no memory")
+    return compose("exec", "-T", agent, "heimdall-memory", *args)
+
+
 def chat_status(chat_url: str, token: str) -> int | None:
     request = urllib.request.Request(chat_url)
     basic = base64.b64encode(f"{CHAT_USER}:{token}".encode()).decode()
@@ -102,8 +127,11 @@ def chat_status(chat_url: str, token: str) -> int | None:
 
 
 def compose(*args: str, env: dict[str, str] | None = None) -> str:
+    files = ["-f", "compose.yaml"]
+    if FOLDER_MOUNTS.exists():
+        files += ["-f", str(FOLDER_MOUNTS)]
     result = subprocess.run(
-        ["docker", "compose", *args],
+        ["docker", "compose", *files, *args],
         cwd=ROOT,
         env={**os.environ, **(env or {})},
         check=True,

@@ -2,7 +2,7 @@ import pytest
 
 from agents import manager, testing
 from agents.openclaw import agent
-from agents.permissions import AgentPermissions
+from core.contracts.agents import AgentPermissions
 
 
 def test_config_offers_only_permitted_tools():
@@ -11,13 +11,16 @@ def test_config_offers_only_permitted_tools():
     assert config["tools"]["profile"] == "minimal"
 
 
-def test_config_calls_the_real_provider_with_only_the_fake_key():
+def test_config_calls_the_gateway_with_only_the_fake_key():
     config = agent.build_config(AgentPermissions(), "gemini", testing.MODEL)
     entry = config["models"]["providers"]["heimdall"]
-    assert entry["baseUrl"].startswith(f"https://{testing.GEMINI_HOST}/")
+    assert entry["baseUrl"] == "http://gateway:8080/model"
+    assert entry["api"] == "openai-completions"
     assert entry["apiKey"] == agent.FAKE_KEY
     assert entry["models"][0]["id"] == testing.MODEL
-    assert config["mcp"]["servers"]["heimdall"]["headers"]["Authorization"] == f"Bearer {agent.FAKE_KEY}"
+    server = config["mcp"]["servers"]["heimdall"]
+    assert server["url"] == "http://gateway:8080/mcp"
+    assert server["headers"]["Authorization"] == f"Bearer {agent.FAKE_KEY}"
 
 
 def test_memory_and_delegation_are_refused():

@@ -3,6 +3,10 @@ name: heimdall
 include:
   - ../gateway/compose.yaml
 
+volumes:
+  # Survives kill and recreate: live memory plus snapshots. Only `docker compose down -v` removes it.
+  hermes-memory: {}
+
 services:
   hermes:
     build: .
@@ -10,16 +14,13 @@ services:
     depends_on: [gateway]
     environment:
       HEIMDALL_CHAT_TOKEN: ${HEIMDALL_HERMES_TOKEN:-dev-token-change-me}
-      HTTPS_PROXY: http://gateway:8080
-      HTTP_PROXY: http://gateway:8080
-      NO_PROXY: gateway,localhost,127.0.0.1
-      SSL_CERT_FILE: /certs/mitmproxy-ca-cert.pem
-      REQUESTS_CA_BUNDLE: /certs/mitmproxy-ca-cert.pem
+      GEMINI_BASE_URL: http://gateway:8080/model
       GOOGLE_API_KEY: sk-fake-hermes-01
+      ANTHROPIC_BASE_URL: http://gateway:8080/model
       ANTHROPIC_API_KEY: sk-fake-hermes-01
     volumes:
       - ${HEIMDALL_HERMES_CONFIG:-./config.json}:/config/config.json:ro
-      - gateway-ca:/certs:ro
+      - hermes-memory:/heimdall/memory
 
   hermes-ui:
     image: alpine/socat:1.8.0.3

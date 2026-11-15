@@ -2,7 +2,7 @@ import pytest
 
 from agents import manager, testing
 from agents.hermes import agent
-from agents.permissions import AgentPermissions
+from core.contracts.agents import AgentPermissions
 
 META_TOOLS = {"tool_search", "tool_describe", "tool_call"}
 
@@ -17,7 +17,9 @@ def test_config_has_no_builtin_toolsets_by_default():
 def test_config_names_the_provider_and_sends_only_the_fake_key():
     config = agent.build_config(AgentPermissions(), "gemini", testing.MODEL)
     assert config["model"] == {"default": testing.MODEL, "provider": "gemini"}
-    assert config["mcp_servers"]["heimdall"]["headers"]["Authorization"] == f"Bearer {agent.FAKE_KEY}"
+    server = config["mcp_servers"]["heimdall"]
+    assert server["url"] == "http://gateway:8080/mcp"
+    assert server["headers"]["Authorization"] == f"Bearer {agent.FAKE_KEY}"
     assert config["telemetry"]["shared_metrics"] == {"enabled": False, "send": False, "offer_version": 2}
 
 

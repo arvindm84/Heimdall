@@ -11,6 +11,9 @@ RUN case "$TARGETARCH" in \
  && chmod 755 /usr/local/bin/ttyd
 COPY --chmod=755 start.sh /usr/local/bin/heimdall-start
 COPY instructions.md /opt/heimdall/SOUL.md
+COPY --chmod=755 memory.sh /usr/local/bin/heimdall-memory
+# Created here (owned by hermes) so the named volume starts with that owner.
+RUN mkdir -p /heimdall/memory/live /heimdall/memory/snapshots && chown -R hermes /heimdall/memory
 RUN grep -q 'print(f"⚠ {problem}", file=sys.stderr)' /opt/hermes/hermes_cli/main.py \
  && sed -i 's/print(f"⚠ {problem}", file=sys.stderr)/pass/' /opt/hermes/hermes_cli/main.py
 USER hermes

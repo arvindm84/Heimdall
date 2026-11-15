@@ -9,7 +9,7 @@
     "mode": "replace",
     "providers": {
       "heimdall": {
-        "baseUrl": "https://generativelanguage.googleapis.com/v1beta/openai",
+        "baseUrl": "http://gateway:8080/model",
         "apiKey": "sk-fake-openclaw-01",
         "api": "openai-completions",
         "models": [
@@ -30,7 +30,7 @@
   "mcp": {
     "servers": {
       "heimdall": {
-        "url": "http://gateway:8000/mcp",
+        "url": "http://gateway:8080/mcp",
         "transport": "streamable-http",
         "requestTimeoutMs": 130000,
         "headers": { "Authorization": "Bearer sk-fake-openclaw-01" }

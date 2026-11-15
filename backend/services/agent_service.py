@@ -14,7 +14,7 @@ compose and rewrite the same gateway config file.
 from pathlib import Path
 
 from agents import manager
-from agents.permissions import AgentPermissions
+from core.contracts.agents import AgentPermissions
 
 # Agents we've launched: name -> what /launch returned (chat address and login).
 # Lets the dashboard get the chat details back after a page reload.
@@ -27,6 +27,7 @@ def launch_agent(agent: str, config: dict) -> dict:
     config:
         folders     [{"path": "/abs/path", "label": "public" | "private" | "confidential", "write": false}]
         tools       ["files_read", "files_list"]
+        skills      names of installed skills, OpenClaw only
         memory      bool, Hermes only
         delegation  bool, Hermes only
         provider    "gemini" | "anthropic" (default "gemini")
@@ -78,6 +79,6 @@ def list_agents() -> dict:
         ],
         "providers": [
             {"name": name, "default_model": default_model}
-            for name, (_host, default_model) in manager.PROVIDERS.items()
+            for name, default_model in manager.PROVIDERS.items()
         ],
     }
