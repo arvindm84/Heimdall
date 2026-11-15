@@ -62,7 +62,17 @@ def docker_failed(error):
     # A docker compose command failed. Its stderr says why (Docker not running,
     # port in use, build error...), so pass the end of it on.
     detail = (error.stderr or "").strip()[-2000:]
+    if "Cannot connect to the Docker daemon" in detail:
+        return jsonify({"error": "Docker isn't running. Open Docker Desktop and try again.", "detail": detail}), 503
     return jsonify({"error": "docker compose failed", "detail": detail}), 500
+
+
+@app.errorhandler(FileNotFoundError)
+def program_missing(error):
+    # subprocess raises this when the `docker` command itself doesn't exist.
+    if error.filename == "docker":
+        return jsonify({"error": "Docker isn't installed. Install Docker Desktop, open it, and try again."}), 503
+    return jsonify({"error": str(error)}), 500
 
 
 @app.errorhandler(TimeoutError)

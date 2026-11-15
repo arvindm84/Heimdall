@@ -4,23 +4,22 @@ React + Vite + TypeScript + Tailwind. "Checkpoint ledger" theme: calm dark pine,
 
 ## Run it
 
-Needs Node 20+ and Python 3.11 with pip.
+Needs Node 20+, [uv](https://docs.astral.sh/uv/) (Python 3.11 is installed by uv), and Docker Desktop for starting agents.
+Put API keys in `.env` at the repo root (copy `.env.example`).
 
 ```bash
 cd frontend
-npm run setup   # first time: installs npm packages + the backend's Python requirements
-npm run dev     # starts the UI (web) and Flask (api) together
+npm run setup   # first time: npm packages + the Python environment (uv sync)
+npm run dev     # UI (web) + Flask (api) together -> http://localhost:5173
 ```
 
-Open http://localhost:5173. Ctrl+C stops both.
-
 - UI only, without Flask: `npm run dev:web`
-- Using a virtualenv? Activate it before `npm run setup` / `npm run dev`; both use `python3`.
+- The desktop app: `npm run build`, then from the repo root `uv run python run.py`
 
 ## How it talks to the backend
 
 Call the backend as `/api/<route>` (e.g. `fetch("/api/response", ...)`, `new EventSource("/api/events")`).
-Vite forwards `/api/*` to Flask on 127.0.0.1:5000 with `/api` removed, so there's no CORS setup.
+Vite forwards `/api/*` to Flask on 127.0.0.1:8765 in development; in the desktop app Flask serves the UI and `/api` itself.
 
 ## Layout
 
@@ -28,7 +27,8 @@ Vite forwards `/api/*` to Flask on 127.0.0.1:5000 with `/api` removed, so there'
 - `src/components/Header.tsx`: app name, tabs, Stop all agents
 - `src/pages/`: Agents (home), Activity, Flow
 - `src/data/tools.ts`: plain-language names for tools (never show raw ids like `files_read`)
-- `src/data/agents.ts`: MOCK agents until the backend has a list endpoint
+- `src/lib/api.ts`: calls to the back end (agents, launch, stop, kill)
+- `src/data/agents.ts`: the agents and the permissions Start sends, until there's a permissions screen
 - `src/data/sample.ts`: SAMPLE firewall events for Activity and Flow (temporary)
 
 ## Design rules (from the frontend-design skill)

@@ -1,10 +1,15 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Header, { type Page } from "./components/Header";
 import AgentsPage from "./pages/AgentsPage";
 import FlowPage from "./pages/FlowPage";
 import ActivityPage from "./pages/ActivityPage";
-import { MOCK_AGENTS, type Agent } from "./data/agents";
+import { AGENT_PROFILES, type Agent } from "./data/agents";
 import { SAMPLE_EVENTS } from "./data/sample";
+import { ApiError, api } from "./lib/api";
+
+// Turn any thrown error into what an agent row shows.
+const toError = (e: unknown) =>
+  e instanceof ApiError ? { message: e.message, detail: e.detail } : { message: String(e) };
 
 export default function App() {
   // Page lives in the URL hash (#flow, #activity) so a refresh keeps you where you were.
@@ -17,17 +22,64 @@ export default function App() {
     setPageState(p);
   };
 
-  const [agents, setAgents] = useState<Agent[]>(MOCK_AGENTS);
-  const setStatus = (id: string, status: Agent["status"]) =>
-    setAgents((all) => all.map((a) => (a.id === id ? { ...a, status } : a)));
+  const [agents, setAgents] = useState<Agent[]>(() =>
+    AGENT_PROFILES.map((p) => ({ ...p, status: "stopped", chat: null, error: null })),
+  );
+  const [backendError, setBackendError] = useState<string | null>(null);
 
-  // MOCK start/stop: will call POST /api/launch and /api/kill once those routes are ready.
-  const start = (id: string) => {
-    setStatus(id, "sealing");
-    setTimeout(() => setStatus(id, "running"), 2200);
+  const update = (id: string, changes: Partial<Agent>) =>
+    setAgents((all) => all.map((a) => (a.id === id ? { ...a, ...changes } : a)));
+
+  // On load (and after a reload): ask the back end which agents are already running.
+  useEffect(() => {
+    api
+      .agents()
+      .then(({ agents: live }) =>
+        setAgents((all) =>
+          all.map((a) => {
+            const chat = live.find((l) => l.name === a.id)?.chat ?? null;
+            return { ...a, chat, status: chat ? "running" : "stopped" };
+          }),
+        ),
+      )
+      .catch((e) => setBackendError(toError(e).message));
+  }, []);
+
+  // Start: builds and starts the container, then returns the chat login. Can take minutes.
+  const start = async (id: string) => {
+    const agent = agents.find((a) => a.id === id)!;
+    update(id, { status: "starting", error: null });
+    try {
+      const chat = await api.launch(id, agent.config);
+      update(id, { status: "running", chat });
+    } catch (e) {
+      update(id, { status: "stopped", error: toError(e) });
+    }
   };
-  const stop = (id: string) => setStatus(id, "stopped");
-  const stopAll = () => setAgents((all) => all.map((a) => ({ ...a, status: "stopped" })));
+
+  // Stop: stops the container but keeps it, so Start is quicker next time.
+  const stop = async (id: string) => {
+    update(id, { status: "stopping", error: null });
+    try {
+      await api.stop(id);
+      update(id, { status: "stopped", chat: null });
+    } catch (e) {
+      update(id, { status: "running", error: toError(e) });
+    }
+  };
+
+  // Kill switch: kill and remove every running agent's container, one at a time.
+  const stopAll = async () => {
+    for (const a of agents.filter((a) => a.status === "running")) {
+      update(a.id, { status: "stopping", error: null });
+      try {
+        await api.kill(a.id);
+        update(a.id, { status: "stopped", chat: null });
+      } catch (e) {
+        update(a.id, { status: "running", error: toError(e) });
+      }
+    }
+  };
 
   const running = agents.filter((a) => a.status === "running").length;
   const waiting = SAMPLE_EVENTS.filter((e) => e.verdict === "waiting").length; // SAMPLE
@@ -37,7 +89,7 @@ export default function App() {
       <Header page={page} onNavigate={setPage} waitingCount={waiting} runningCount={running} onStopAll={stopAll} />
       <main className="flex-1 overflow-y-auto">
         <div className="mx-auto max-w-6xl px-8 py-10">
-          {page === "agents" && <AgentsPage agents={agents} onStart={start} onStop={stop} />}
+          {page === "agents" && <AgentsPage agents={agents} backendError={backendError} onStart={start} onStop={stop} />}
           {page === "activity" && <ActivityPage />}
           {page === "flow" && <FlowPage />}
         </div>
