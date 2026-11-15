@@ -103,7 +103,7 @@ Truth rule: events carry the rule id, the removed text and counts. No risk score
 
 ## Build order (tests first at every step)
 
-Each step ends with a commit and something visible in the event stream. Steps 1 to 6 are the demo; stop adding after them if time is short.
+Each step ends with a commit and something visible in the event stream. Steps 1 to 6 are the demo; stop adding after them if time is short. Tasks, tests and issues for each step are in `firewall-steps.md`.
 
 | Step | Build | Done when | Scene |
 |---|---|---|---|
