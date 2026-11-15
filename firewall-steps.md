@@ -107,18 +107,22 @@ Gmail and web rules are added in the steps that build those tools.
 
 ## Step 2: placeholder vault (about 1.5 h)
 
-Branch: `firewall/placeholder-vault`
+Branch: `firewall-placeholder-vault`
 
 **Tests first:**
 - `test_vault.py`: same value gives the same `{{EMAIL_1}}` within a session; a different session gives its own numbering; `fill()` restores the original; `fill()` leaves a placeholder from another session untouched and reports it.
 - `test_pii.py`: finds email, US phone, SSN, card numbers that pass Luhn (not ones that fail); does not replace `{{EMAIL_1}}` itself; one made-up 300-word email under 300 ms after warm-up.
 
 **Build:**
-1. `pii.py`: regex recognizers run first; Presidio (`en_core_web_sm`, loaded once at start-up) only for `PERSON`. Returns spans; overlapping spans keep the longest.
+1. `pii.py`: regex recognizers run first; spaCy's `en_core_web_sm` (loaded once) only for `PERSON`. We use spaCy directly instead of through Presidio: for `PERSON`, Presidio only wraps the same spaCy model, and going direct drops its other dependencies, including `tldextract`, which may reach for the network. Returns spans; overlapping spans keep the longest.
 2. `vault.py`: SQLite table `(session_id, kind, value, n)`; `redact(text, session) -> text`; `fill(text, session) -> (text, unknown_tokens)`.
 3. Add redaction to the guard's after-steps for `files_read` and (later) `gmail_read` and `web_fetch`.
 
 **Done when:** reading a fake contacts file returns placeholders, and the event lists how many of each kind were replaced.
+
+**Result (Nov 15):** done. On this laptop, `pii.find` takes a median 79 ms on a made-up 432-word email, after a 1.5 s one-time model load. The small model found "Priya Raman" but missed a later lone "Priya". So once a name is found, every whole-word mention of it, and of each part of it, in the same text is swapped too; all 24 name mentions in the sample are caught. The vault is SQLite at `/state/gateway.db` inside the gateway container, owned by its non-root user. Placeholders are numbered per agent run. The full suite passes: 147 tests, plus 1 symlink test skipped on Windows. That includes a seam test where the real container returns `{{PERSON_1}}`, `{{EMAIL_1}}` and `{{PHONE_1}}` for a made-up contacts file. Neither the made-up personal data nor the real key appears in the gateway logs. The gateway image is now 750 MB, mostly spaCy.
+
+**Known limits:** names the model misses entirely stay visible, and so do phone formats without separators. The vault file holds real values in plain text inside the gateway container. It is lost if the container is recreated, because there is no volume for `/state`.
 
 ## Step 3: model proxy (about 1.5 h)
 

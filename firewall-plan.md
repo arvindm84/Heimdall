@@ -102,7 +102,7 @@ Truth rule: events carry the rule id, the removed text and counts. No risk score
 | `core/firewall/session.py` | Per-agent state: labels, what Confidential text was served, vault handle |
 | `core/firewall/policy.py` | Rule table and `decide()` |
 | `core/firewall/guard.py` | The pipeline wrapper above |
-| `core/firewall/vault.py`, `pii.py` | Placeholder store (SQLite); regex recognizers first (email, phone, SSN, card with Luhn), Presidio with `en_core_web_sm` for names |
+| `core/firewall/vault.py`, `pii.py` | Placeholder store (SQLite at `/state/gateway.db`); regex recognizers first (email, phone, SSN, card with Luhn), spaCy `en_core_web_sm` for names |
 | `core/firewall/sanitize.py`, `injection.py` | Hidden-text stripping; heuristics and the Haiku check |
 | `core/firewall/secrets.py` | Key formats, real-key match, fake-key tripwire, `.env` shape |
 | `core/firewall/core_client.py` | `ask()` and `emit()`; today posts to `/raise` |

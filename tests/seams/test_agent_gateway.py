@@ -15,6 +15,7 @@ from agents.openclaw import agent as openclaw
 from core.contracts.agents import AgentPermissions, FolderAccess
 
 NOTE = "Made-up seam note: the blue folder is in the hall closet."
+CONTACTS = "Made-up contacts. Priya Raman: priya@example.com, (608) 555-0142."
 
 
 @pytest.fixture(scope="module")
@@ -23,6 +24,7 @@ def folder(tmp_path_factory):
     docs = tmp_path_factory.mktemp("seam") / "seamdocs"
     docs.mkdir()
     (docs / "notes.txt").write_text(NOTE, encoding="utf-8")
+    (docs / "contacts.txt").write_text(CONTACTS, encoding="utf-8")
     permissions = AgentPermissions(
         tools=["files_list", "files_read"], folders=[FolderAccess(path=str(docs), label="private")]
     )
@@ -62,7 +64,15 @@ def test_agent_reads_a_file_in_its_folder(folder):
 @pytest.mark.docker
 def test_agent_lists_its_folder(folder):
     result = mcp_call("files_list", {"folder": folder})
-    assert result["content"][0]["text"] == f"{folder}/notes.txt"
+    assert result["content"][0]["text"].splitlines() == [f"{folder}/contacts.txt", f"{folder}/notes.txt"]
+
+
+@pytest.mark.docker
+def test_personal_data_reaches_the_agent_only_as_placeholders(folder):
+    text = mcp_call("files_read", {"path": f"{folder}/contacts.txt"})["content"][0]["text"]
+    assert "priya@example.com" not in text and "555-0142" not in text and "Priya" not in text
+    assert "{{EMAIL_1}}" in text and "{{PHONE_1}}" in text and "{{PERSON_1}}" in text
+    assert last_tool_call()["placeholders"] == {"PERSON": 1, "EMAIL": 1, "PHONE": 1}
 
 
 @pytest.mark.docker
