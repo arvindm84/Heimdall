@@ -1,11 +1,12 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Header, { type Page } from "./components/Header";
 import AgentsPage from "./pages/AgentsPage";
 import FlowPage from "./pages/FlowPage";
 import ActivityPage from "./pages/ActivityPage";
 import QuestionCard from "./components/QuestionCard";
 import { AGENT_PROFILES, type Agent } from "./data/agents";
-import { ApiError, api } from "./lib/api";
+import FolderAccessDialog from "./components/FolderAccessDialog";
+import { ApiError, api, type FolderLabels } from "./lib/api";
 import { useLive } from "./lib/live";
 
 // Turn any thrown error into what an agent row shows.
@@ -46,8 +47,45 @@ export default function App() {
       .catch((e) => setBackendError(toError(e).message));
   }, []);
 
-  // Start: builds and starts the container, then returns the chat login. Can take minutes.
+  // The folder-access popup, for one agent. launchAfter: it was opened by Start, so start once saved.
+  const [folderDialog, setFolderDialog] = useState<{ agent: string; initial: FolderLabels; launchAfter: boolean } | null>(
+    null,
+  );
+
+  // Start: the first time for this agent, ask about folder access first. After that, start right away.
   const start = async (id: string) => {
+    try {
+      const { labels } = await api.folderLabels(id);
+      if (labels === null) {
+        setFolderDialog({ agent: id, initial: {}, launchAfter: true });
+        return;
+      }
+    } catch (e) {
+      update(id, { error: toError(e) });
+      return;
+    }
+    launch(id);
+  };
+
+  // "Folder access" on an agent: change its saved labels without starting it.
+  const editFolders = async (id: string) => {
+    try {
+      const { labels } = await api.folderLabels(id);
+      setFolderDialog({ agent: id, initial: labels ?? {}, launchAfter: false });
+    } catch (e) {
+      update(id, { error: toError(e) });
+    }
+  };
+
+  const saveFolders = async (labels: FolderLabels) => {
+    const { agent, launchAfter } = folderDialog!;
+    await api.saveFolderLabels(agent, labels); // a failure stays in the popup, which shows it
+    setFolderDialog(null);
+    if (launchAfter) launch(agent);
+  };
+
+  // Builds and starts the container, then returns the chat login. Can take minutes.
+  const launch = async (id: string) => {
     const agent = agents.find((a) => a.id === id)!;
     update(id, { status: "starting", error: null });
     try {
@@ -85,18 +123,31 @@ export default function App() {
   // Firewall questions and decisions, live from /api/events.
   const { questions, events, connected } = useLive();
 
-  const running = agents.filter((a) => a.status === "running").length;
+  const runningIds = useMemo(() => agents.filter((a) => a.status === "running").map((a) => a.id), [agents]);
+  const running = runningIds.length;
 
   return (
     <div className="flex h-full flex-col">
       <Header page={page} onNavigate={setPage} waitingCount={questions.length} runningCount={running} onStopAll={stopAll} />
       <main className="flex-1 overflow-y-auto">
         <div className="mx-auto max-w-6xl px-8 py-10">
-          {page === "agents" && <AgentsPage agents={agents} backendError={backendError} onStart={start} onStop={stop} />}
+          {page === "agents" && (
+            <AgentsPage agents={agents} backendError={backendError} onStart={start} onStop={stop} onFolders={editFolders} />
+          )}
           {page === "activity" && <ActivityPage events={events} questions={questions} connected={connected} />}
-          {page === "flow" && <FlowPage events={events} waitingCount={questions.length} />}
+          {page === "flow" && <FlowPage events={events} waitingCount={questions.length} running={runningIds} />}
         </div>
       </main>
+
+      {folderDialog && (
+        <FolderAccessDialog
+          agentName={agents.find((a) => a.id === folderDialog.agent)!.name}
+          initial={folderDialog.initial}
+          saveText={folderDialog.launchAfter ? "Save and start" : "Save"}
+          onSave={saveFolders}
+          onCancel={() => setFolderDialog(null)}
+        />
+      )}
 
       {/* Pop-up for the oldest open question, on every page except Activity (which lists them all).
           The agent is waiting on the answer; after 2 minutes it counts as a deny. */}

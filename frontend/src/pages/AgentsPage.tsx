@@ -8,6 +8,7 @@ type Props = {
   backendError: string | null;
   onStart: (id: string) => void;
   onStop: (id: string) => void;
+  onFolders: (id: string) => void;
 };
 
 const STATUS = {
@@ -17,7 +18,7 @@ const STATUS = {
   stopping: { label: "Stopping", dot: "bg-lichen animate-pulse" },
 } as const;
 
-export default function AgentsPage({ agents, backendError, onStart, onStop }: Props) {
+export default function AgentsPage({ agents, backendError, onStart, onStop, onFolders }: Props) {
   return (
     <div>
       <h1 className="text-3xl font-bold">Your agents</h1>
@@ -95,6 +96,12 @@ export default function AgentsPage({ agents, backendError, onStart, onStop }: Pr
               </div>
 
               <div className="flex gap-2 pt-1">
+                <button
+                  onClick={() => onFolders(agent.id)}
+                  className="rounded border border-rule px-4 py-2 text-sm text-lichen transition-colors hover:border-lichen hover:text-paper"
+                >
+                  Folder access
+                </button>
                 {agent.status === "running" && (
                   <button
                     onClick={() => onStop(agent.id)}

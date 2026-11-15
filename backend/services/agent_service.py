@@ -11,10 +11,12 @@ Launch agents one at a time: two launches at once would both run docker
 compose and rewrite the same gateway config file.
 """
 
+import subprocess
+import threading
 from pathlib import Path
 
 from agents import manager
-from backend.services import key_service
+from backend.services import folder_service, key_service
 from core.contracts.agents import AgentPermissions
 
 # Agents we've launched: name -> what /launch returned (chat address and login).
@@ -27,6 +29,8 @@ def launch_agent(agent: str, config: dict) -> dict:
 
     config:
         folders     [{"path": "/abs/path", "label": "public" | "private" | "confidential", "write": false}]
+                    Left out (as the app does): the folders this agent's user labelled in the
+                    folder-access popup (folder_service.granted_folders). [] means no folders.
         tools       any of files_list, files_read, files_write, gmail_read, gmail_draft, gmail_send, web_fetch
         skills      names of installed skills, OpenClaw only
         memory      bool, Hermes only
@@ -40,6 +44,10 @@ def launch_agent(agent: str, config: dict) -> dict:
     config = dict(config)
     provider = config.pop("provider", None) or "gemini"
     model = config.pop("model", None)
+
+    # No folder list in the request: use what the user chose for this agent in the popup.
+    if "folders" not in config:
+        config["folders"] = folder_service.granted_folders(agent)
 
     # Checks the shape: unknown labels, wrong types, etc.
     permissions = AgentPermissions(**config)
@@ -71,6 +79,32 @@ def kill_agent(agent: str) -> None:
     """Kill and remove the agent's container (the kill switch)."""
     manager.kill_agent(agent)
     _opened.pop(agent, None)
+
+
+def kill_all(timeout: float = 20) -> None:
+    """Kill and remove every Heimdall container: both agents, their chat UIs and the gateway.
+
+    Called by run.py when the app window closes, so no agent keeps running with nobody
+    watching. Covers agents started by an earlier run of the app too. Never raises and
+    never waits more than `timeout` seconds: closing the app must work even when Docker
+    is stopped, missing or stuck.
+    """
+    _opened.clear()
+
+    def down() -> None:
+        try:
+            # --timeout 0: kill at once instead of waiting 10 seconds for each container.
+            manager.compose("down", "--timeout", "0")
+        except (OSError, subprocess.CalledProcessError) as error:
+            print(f"Couldn't stop the agents' containers: {error}")
+
+    # In a daemon thread so a stuck Docker can't hang the app: if it hasn't answered in
+    # time, we stop waiting and the thread ends with the process.
+    worker = threading.Thread(target=down, daemon=True)
+    worker.start()
+    worker.join(timeout)
+    if worker.is_alive():
+        print("Docker didn't answer in time. The agents' containers may still be running.")
 
 
 def list_agents() -> dict:
