@@ -2,9 +2,11 @@
 // They arrive from the gateway through the back end (`event: firewall` on /api/events).
 // Every kind and its fields: the Events table in firewall-integration.md.
 
-// allowed: went through. blocked: stopped or removed by Heimdall.
+// allowed: went through. blocked: stopped by Heimdall.
 // flagged: let through, but the AI second opinion thinks it looks like an injection.
-export type Verdict = "allowed" | "blocked" | "flagged";
+// removed: hidden text Heimdall cut out of a page or email; the request itself went on
+// (its own tool_call event says how), so this is not a block of the request.
+export type Verdict = "allowed" | "blocked" | "flagged" | "removed";
 export type ResourceId = "files" | "gmail" | "web" | "model";
 
 export type FirewallEvent = {
@@ -25,6 +27,7 @@ export const VERDICT_STYLE: Record<Verdict, { label: string; text: string; hex: 
   allowed: { label: "Allowed", text: "text-allowed", hex: "#9cc49f" },
   blocked: { label: "Blocked", text: "text-blocked", hex: "#cf5a52" },
   flagged: { label: "Flagged", text: "text-waiting", hex: "#d7a548" },
+  removed: { label: "Removed", text: "text-waiting", hex: "#d7a548" },
 };
 
 const AGENT_NAMES: Record<string, string> = { openclaw: "OpenClaw", hermes: "Hermes" };
@@ -96,8 +99,8 @@ export function fromGateway(raw: Record<string, any>): FirewallEvent | null {
         resource: resourceOf(raw.tool),
         action: str(raw.tool),
         target: str(raw.source),
-        verdict: "blocked",
-        detail: `Hidden text (${str(raw.where)}) removed before the agent saw it: "${str(raw.text)}". ${str(raw.reason)}`,
+        verdict: "removed",
+        detail: `Hidden text (${str(raw.where)}) removed from the content before the agent saw it: "${str(raw.text)}". ${str(raw.reason)}`,
       };
     case "injection_check":
       // Only "flagged" is shown. "not_checked" means no check ran, so it must never look clean.

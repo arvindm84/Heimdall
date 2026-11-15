@@ -92,7 +92,9 @@ function withDestination(prev: Destination[], event: Drawn, n: number): Destinat
   return next;
 }
 
-const drawnOf = (events: FirewallEvent[]) => events.filter((e): e is Drawn => e.resource !== null);
+// Removed hidden text isn't drawn: the request it came with is already drawn by its own event.
+const drawnOf = (events: FirewallEvent[]) =>
+  events.filter((e): e is Drawn => e.resource !== null && e.verdict !== "removed");
 
 // ---------- Layout ----------
 
@@ -262,6 +264,7 @@ function DestinationNode({ data }: NodeProps<Node<DestinationData>>) {
     allowed: "border-rule",
     blocked: "border-dashed border-blocked/70 text-blocked line-through decoration-blocked/70",
     flagged: "border-dashed border-waiting/70 text-waiting",
+    removed: "border-dashed border-waiting/70 text-waiting", // not drawn (see drawnOf); here for completeness
   }[data.verdict];
   return (
     <div className="node-enter" style={{ width: W.destination }}>
