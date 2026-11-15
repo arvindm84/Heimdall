@@ -62,5 +62,15 @@ def test_delegation_and_memory_are_offered_when_permitted():
     try:
         calls = [call for call in testing.ask("hermes", "Say hi") if call["tools_offered"]]
         assert {"delegate_task", "memory"} <= set(calls[-1]["tools_offered"])
+        # Verify persistent memory snapshot, show and rollback inside the container.
+        testing.in_agent("hermes", "sh", "-c", "echo 'Contact: {{EMAIL_1}}' > /heimdall/memory/live/MEMORY.md")
+        assert "{{EMAIL_1}}" in manager.memory("hermes", "show")
+        snap_id = manager.memory("hermes", "snapshot").strip()
+        assert snap_id in manager.memory("hermes", "list").splitlines()
+        testing.in_agent("hermes", "sh", "-c", "echo 'poisoned note' > /heimdall/memory/live/MEMORY.md")
+        assert "poisoned note" in manager.memory("hermes", "show")
+        manager.memory("hermes", "rollback", snap_id)
+        assert manager.memory("hermes", "show").strip() == "Contact: {{EMAIL_1}}"
     finally:
         manager.kill_agent("hermes")
+
