@@ -69,12 +69,14 @@ Branch: `firewall-policy-core` (a branch named `firewall/...` can't exist next t
 |---|---|---|
 | `no_permissions` | no `permissions.json`, or its key doesn't match | deny |
 | `tool_not_permitted` | tool not in `permissions.tools` | deny |
+| `unknown_tool` | listed in `permissions.tools` but not a tool the gateway has | deny |
 | `folder_not_permitted` | first path part isn't an allowed folder | deny |
 | `path_escapes_folder` | `..`, absolute path, or a symlink that resolves outside the folder | deny |
 | `not_found` | no such file or folder | deny |
 | `file_too_large` | over 2 MB | deny |
 | `not_text` | not UTF-8 and not a PDF | deny |
 | `folder_read_only` | `files_write` to a folder without `write` | deny |
+| `write_failed` | the write itself fails (for example a read-only mount) | deny |
 | `write_after_untrusted` | `files_write` after the session read untrusted content | ask (approval) |
 | `files_list_allowed`, `files_read_allowed`, `files_write_allowed` | otherwise | allow |
 
@@ -100,6 +102,8 @@ Gmail and web rules are added in the steps that build those tools.
 8. `agents/manager.py`: the one-line resolve fix from decision 2.
 
 **Done when:** `uv run pytest` passes (B's tests and ours, Docker included), and the seam test shows an allowed read and a denied read, each as one `tool_call` event with its `rule_id`.
+
+**Result (Nov 15):** built as planned, plus `unknown_tool` and `write_failed`. Firewall unit tests and B's tests pass (98, plus 1 symlink test skipped on Windows; the same check passes inside the Linux gateway image). The seam test passes 7 of 7 with real containers, including one Gemini turn where the model read the file itself.
 
 ## Step 2: placeholder vault (about 1.5 h)
 

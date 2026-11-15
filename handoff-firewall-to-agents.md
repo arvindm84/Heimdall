@@ -19,10 +19,11 @@ What changed for you with the real gateway:
 - `HEIMDALL_PROVIDER=mock` in `.env` gives a scripted model with no key, for offline runs.
 - Tool results are sent once, without the SDK's extra JSON copy.
 
-## Coming in firewall Step 1 (heads-up)
+## Firewall Step 1 (what changed for you)
 
-- `files_read` and friends will read real files from the folders you mount, instead of returning canned text. A call outside the agent's permissions is denied, but it still shows as a `tool_call` event (with `"decision": "deny"`). So `check_sealed_and_routed`, which looks for any `files_read` call, keeps working.
-- The gateway needs to know which mount each folder in `permissions.json` is. Step 1 changes `write_permissions` to store the resolved folder path, which is what the mount name comes from. The firewall side will make that change and run your tests.
+- `files_list`, `files_read` and `files_write` now work on the folders you mount, with paths written as `<folder>/<path>`. A call outside the agent's permissions is denied, but it still shows as a `tool_call` event (with `"decision": "deny"`), so `check_sealed_and_routed` keeps working.
+- Done on the firewall side: `write_permissions` in `agents/manager.py` now stores each folder's resolved path, whose last part is the mount name the gateway looks for. Before, a path typed as `.` or `~/docs` couldn't be matched. `agents/test_manager.py` has a test for it, and the existing assertion now expects the resolved path.
+- New seam test `tests/seams/test_agent_gateway.py` (ours together): it opens OpenClaw with a made-up folder and checks reads, listings and refusals through the real containers.
 
 ## Later
 
