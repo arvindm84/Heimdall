@@ -4,8 +4,7 @@ import pytest
 
 from core.firewall import core_client
 from core.firewall.config import GatewaySettings
-
-FAKE_KEY = "sk-fake-openclaw-01"
+from tests.firewall.helpers import FAKE_KEY
 
 
 @pytest.fixture
@@ -24,5 +23,5 @@ def events(monkeypatch):
 
 @pytest.fixture
 def mock_settings():
-    """One agent (openclaw) using the mock provider: no network, no real key."""
-    return GatewaySettings(fake_keys={FAKE_KEY: "openclaw"}, provider="mock")
+    """One agent (openclaw) using the mock model: no network, no real key."""
+    return GatewaySettings(fake_keys={FAKE_KEY: "openclaw"}, mock=True)

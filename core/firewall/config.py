@@ -1,17 +1,11 @@
-"""Gateway settings.
+"""Gateway settings, read from the gateway container's environment.
 
-Step 0 reads everything from the gateway container's environment. Step 1 adds
-/config/gateway.json (folder labels, providers) and each agent's
-AgentPermissions from core/contracts/agents.py.
+Step 1 adds each agent's permissions from /config/agents/<agent>/permissions.json,
+which B's agent manager writes.
 """
 
 import os
 from dataclasses import dataclass, field
-from typing import Literal
-
-# Where the gateway sends an agent's model calls. "mock" answers locally with a
-# scripted reply, so tests and B's container checks need no network or key.
-Provider = Literal["mock", "anthropic", "openrouter"]
 
 
 @dataclass(frozen=True)
@@ -20,12 +14,10 @@ class GatewaySettings:
 
     # Fake key -> agent name. The fake key is how we tell agents apart.
     fake_keys: dict[str, str] = field(default_factory=dict)
-    provider: Provider = "mock"
+    # True: answer model calls with a scripted reply (no network, no key). For tests and offline demos.
+    mock: bool = False
+    gemini_key: str = ""
     anthropic_key: str = ""
-    # The gateway, not the agent, chooses the model. Defaults match the fake gateway.
-    anthropic_model: str = "claude-sonnet-5-5"
-    openrouter_key: str = ""
-    openrouter_model: str = "anthropic/claude-haiku-4.5"
 
 
 def parse_fake_keys(text: str) -> dict[str, str]:
@@ -37,33 +29,15 @@ def parse_fake_keys(text: str) -> dict[str, str]:
     return {key.strip(): agent.strip() for agent, key in pairs}
 
 
-def pick_provider(env: dict[str, str]) -> Provider:
-    """Use HEIMDALL_PROVIDER if it names a known provider.
-
-    Otherwise follow the fake gateway's rule: OpenRouter if its key is set, then
-    Anthropic, else the mock.
-    """
-    chosen = env.get("HEIMDALL_PROVIDER", "")
-    if chosen in ("mock", "anthropic", "openrouter"):
-        return chosen
-    if env.get("OPENROUTER_API_KEY"):
-        return "openrouter"
-    if env.get("ANTHROPIC_API_KEY"):
-        return "anthropic"
-    return "mock"
-
-
 def load_settings(env: dict[str, str] | None = None) -> GatewaySettings:
-    """Build settings from the environment (or a given dict, for tests)."""
+    """Build settings from the environment (or a given dict, for tests).
+
+    B's agents/gateway/compose.yaml sets HEIMDALL_FAKE_KEYS; the real keys come from .env.
+    """
     env = dict(os.environ) if env is None else env
-    defaults = GatewaySettings()
     return GatewaySettings(
-        # Default matches HEIMDALL_FAKE_KEY in compose.yaml, so B's setup works unchanged.
-        fake_keys=parse_fake_keys(env.get("HEIMDALL_FAKE_KEYS", "openclaw:sk-fake-openclaw-01")),
-        provider=pick_provider(env),
+        fake_keys=parse_fake_keys(env.get("HEIMDALL_FAKE_KEYS", "")),
+        mock=env.get("HEIMDALL_PROVIDER") == "mock",
+        gemini_key=env.get("GEMINI_API_KEY", ""),
         anthropic_key=env.get("ANTHROPIC_API_KEY", ""),
-        # `or` so an empty line in .env (OPENROUTER_MODEL=) still gets the default.
-        anthropic_model=env.get("ANTHROPIC_MODEL") or defaults.anthropic_model,
-        openrouter_key=env.get("OPENROUTER_API_KEY", ""),
-        openrouter_model=env.get("OPENROUTER_MODEL") or defaults.openrouter_model,
     )

@@ -1,8 +1,8 @@
 """Heimdall gateway: MCP tools at /mcp and the model proxy at /model, one process on port 8080.
 
-It replaces B's images/fake-gateway/server.py with the same URLs, so OpenClaw's
-config does not change. Step 0 tools return canned text; Step 1 adds real files
-behind the policy guard.
+It replaces B's stand-in (agents/gateway/server.py) with the same URLs and log
+lines, so agent configs don't change. Tools still return canned text; Step 1 adds
+real files behind the policy guard.
 
 Run with `python -m core.gateway`.
 """
@@ -19,18 +19,22 @@ from core.proxy.model_route import make_model_route
 CANNED_FILES = {"notes.txt": "Canned text from the Heimdall gateway. Contact: {{EMAIL_1}}"}
 
 
-def caller(ctx: Context, settings: GatewaySettings) -> str:
-    """The agent named by the bearer key on this MCP call, or "unknown".
+def caller(ctx: Context, settings: GatewaySettings, tool: str) -> str:
+    """The agent named by the bearer key on this MCP call.
 
-    Step 0 only records it. From Step 1 an unknown caller is denied.
+    Fail closed: no HTTP request, no key or an unknown key raises, so the tool
+    never runs. FastMCP turns the error into an error result for the agent.
     """
     try:
         headers = ctx.request_context.request.headers
     except (ValueError, AttributeError):
-        # No HTTP request behind this call (an in-process call in tests).
-        return "unknown"
+        headers = {}
     key = headers.get("authorization", "").removeprefix("Bearer ").strip()
-    return settings.fake_keys.get(key, "unknown")
+    agent = settings.fake_keys.get(key)
+    if agent is None:
+        core_client.emit("tool_denied", tool=tool, reason="missing or unknown fake key")
+        raise PermissionError("Heimdall: unknown agent")
+    return agent
 
 
 def build_gateway(settings: GatewaySettings, transport: httpx.AsyncBaseTransport | None = None) -> FastMCP:
@@ -48,16 +52,18 @@ def build_gateway(settings: GatewaySettings, transport: httpx.AsyncBaseTransport
 
     # Tool names use underscores: the Claude API rejects dots in tool names.
     # Tools are async so a later approval wait does not block other calls.
-    @mcp.tool()
+    # structured_output=False: otherwise the SDK sends a second, JSON copy of every
+    # result and agents show the model the file text twice.
+    @mcp.tool(structured_output=False)
     async def files_read(path: str, ctx: Context) -> str:
         """Read a file from the user's allowed folders."""
-        core_client.emit("tool_call", agent=caller(ctx, settings), tool="files_read", path=path)
+        core_client.emit("tool_call", agent=caller(ctx, settings, "files_read"), tool="files_read", path=path)
         return CANNED_FILES.get(path, f"(no file named {path})")
 
-    @mcp.tool()
+    @mcp.tool(structured_output=False)
     async def files_list(ctx: Context) -> list[str]:
         """List files in the user's allowed folders."""
-        core_client.emit("tool_call", agent=caller(ctx, settings), tool="files_list")
+        core_client.emit("tool_call", agent=caller(ctx, settings, "files_list"), tool="files_list")
         return list(CANNED_FILES)
 
     # The model proxy shares the MCP server's HTTP app and port.
