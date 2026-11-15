@@ -1,0 +1,50 @@
+{
+  "gateway": {
+    "mode": "local",
+    "bind": "loopback",
+    "auth": { "mode": "token", "token": "${HEIMDALL_CHAT_TOKEN}" },
+    "controlUi": { "enabled": false }
+  },
+  "models": {
+    "mode": "replace",
+    "providers": {
+      "heimdall": {
+        "baseUrl": "http://gateway:8080/model",
+        "apiKey": "${HEIMDALL_FAKE_KEY}",
+        "api": "anthropic-messages",
+        "models": [
+          {
+            "id": "default",
+            "name": "Model chosen in Heimdall",
+            "reasoning": false,
+            "input": ["text"],
+            "contextWindow": 200000,
+            "maxTokens": 8192
+          }
+        ]
+      }
+    }
+  },
+  "agents": { "defaults": { "model": { "primary": "heimdall/default" }, "skipBootstrap": true } },
+  "tools": { "profile": "minimal", "alsoAllow": ["bundle-mcp"], "deny": ["session_status", "gateway"] },
+  "mcp": {
+    "servers": {
+      "heimdall": { "url": "http://gateway:8080/mcp", "transport": "streamable-http", "requestTimeoutMs": 130000 }
+    }
+  },
+  "plugins": {
+    "entries": {
+      "browser": { "enabled": false },
+      "canvas": { "enabled": false },
+      "cua-computer": { "enabled": false },
+      "device-pair": { "enabled": false },
+      "file-transfer": { "enabled": false },
+      "geolocation": { "enabled": false },
+      "linux-node": { "enabled": false },
+      "talk-voice": { "enabled": false },
+      "ollama": { "enabled": false },
+      "openai": { "enabled": false },
+      "xai": { "enabled": false }
+    }
+  }
+}
