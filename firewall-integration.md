@@ -1,8 +1,8 @@
 # Integrating with the firewall
 
-For B (agents) and C (back end and app), and the Claude sessions working for them. This describes the firewall as it is on the `firewall` branch on Nov 15. It covers what each of you has to do for the firewall to deliver what `project-plan.md` promises. It replaces the earlier handoff files.
+For B (agents) and C (back end and app), and the Claude sessions working for them. This describes the firewall as it is on Nov 15, with what B and C wire up to reach it. It replaces the earlier handoff files.
 
-Each to-do is marked **[B]** or **[C]**. Everything else is already in place and tested.
+The to-do lists from the first version are done (GitHub issues #1 to #11). Section 5 lists what is still open.
 
 ## 1. The firewall in one page
 
@@ -17,11 +17,12 @@ The firewall is one container, `gateway`, built from `images/gateway/Dockerfile`
 
 **The rules the firewall enforces.** Each one comes from `project-plan.md` sections 4 and 6:
 - **Who an agent is:** its fake key. On MCP calls it travels as `Authorization: Bearer <fake key>`; on model calls, as `x-api-key` or Bearer. An unknown key is refused.
-- **What an agent may do:** its `permissions.json` (section 3). Tools not listed are refused. Folders not listed don't exist for it.
+- **What an agent may do:** its `permissions.json` (section 2). Tools not listed are refused. Folders not listed don't exist for it. Model calls go only to the provider and model the user chose, or the local model.
 - **Personal data** in file, mail and web text reaches the agent as typed placeholders (`{{EMAIL_1}}`). The real values stay in the gateway's vault (the `gateway-state` volume) and are filled in only in an email the user has approved.
 - **Mail and web pages** are cleaned of hidden text before the agent sees them. Hidden text that looks like an instruction becomes a `hidden_instruction` event.
 - **Approvals:** sending email always asks the user. After the agent has read mail or a web page, file writes and web fetches ask too.
-- **Consent:** before text from a Confidential folder goes to a cloud model, the user is asked once per file per run. A deny strips the text and the request still goes out. The same applies to sends and fetches after a Confidential read. The local model is never asked about.
+- **Consent:** before text from a Confidential folder (or a Confidential note) goes to a cloud model, the user is asked once per file per run, and can allow that file or the whole folder for the run. A deny strips the text and the request still goes out.
+- **Memory:** notes are kept in the gateway, each with the label of the session that wrote it. Reading notes raises the reader's label to theirs. The same applies to sends and fetches after a Confidential read. The local model is never asked about.
 - **Secrets:** a fake key or any other secret in a model request or a tool argument is blocked (`key_theft_attempt`, `secret_in_request`, `secret_in_tool_call`).
 
 ## 2. Agents (B)
@@ -34,9 +35,9 @@ Point the agent's model provider at the gateway, using the fake key as the API k
 |---|---|---|---|
 | `gemini` | `http://gateway:8080/model` | OpenAI `chat/completions` | Gemini's OpenAI-compatible endpoint |
 | `anthropic` | `http://gateway:8080/model` | Anthropic `messages` | Anthropic |
-| `local` | `http://gateway:8080/model/local` | OpenAI `chat/completions` | Ollama on the host (`OLLAMA_URL`, default `http://host.docker.internal:11434/v1/chat/completions`) |
+| `local` | `http://gateway:8080/model/local` | OpenAI `chat/completions` | Ollama on the host (`OLLAMA_URL`, default `http://host.docker.internal:11434/v1/chat/completions`). Default model `llama3.2:3b`: run `ollama pull llama3.2:3b` on the demo laptop |
 
-OpenClaw sets this in `agents/openclaw/config.json` (`models.providers.heimdall`). Hermes sets it with `GEMINI_BASE_URL` and `ANTHROPIC_BASE_URL` in `agents/hermes/compose.yaml`. Both work today for `gemini`; `anthropic` is wired up but not run live (no key on the test laptop).
+OpenClaw sets this in `agents/openclaw/config.json` (`models.providers.heimdall`; `build_config` switches `baseUrl` for `local`). Hermes sets it with `GEMINI_BASE_URL` and `ANTHROPIC_BASE_URL` in `agents/hermes/compose.yaml`, and for `local` with `provider: custom` and `base_url` in its config. `gemini` runs live on both; `local` ran live on both against a stand-in Ollama server; `anthropic` is wired up but not run live (no key on the test laptop).
 
 ### MCP tools
 
@@ -56,8 +57,10 @@ Use a tool timeout of 130 s: an approval can wait up to 125 s. Both agents' conf
 | `gmail_draft` | `to`, `subject`, `body` | Saves a draft in the gateway; never asks |
 | `gmail_send` | `to`, `subject`, `body` | Always asks; fills in placeholders after approval |
 | `web_fetch` | `url` | GET only, public addresses only; asks after untrusted or private data |
+| `memory_write` | `text` | Saves a note with this session's label; only with `memory: true` |
+| `memory_read` | none | The newest 50 notes; raises the session label; Confidential notes come in markers |
 
-Only the tools listed in the agent's permissions are offered to the model (`build_config` does this for both agents) and allowed by the gateway.
+Only the tools listed in the agent's permissions are offered to the model (`build_config` does this for both agents) and allowed by the gateway. `memory: true` adds the two memory tools; Hermes's own memory stays off, because its notes would reach the model without passing the firewall.
 
 ### `permissions.json`
 
@@ -68,6 +71,7 @@ Only the tools listed in the agent's permissions are offered to the model (`buil
   "run_id": "a new random id every time the agent is opened",
   "fake_key": "sk-fake-openclaw-01",
   "provider": "gemini",
+  "model": "gemini-flash-lite-latest",
   "permissions": { "folders": [...], "tools": [...], "skills": [...], "memory": false, "delegation": false }
 }
 ```
@@ -75,7 +79,7 @@ Only the tools listed in the agent's permissions are offered to the model (`buil
 - `run_id`: a new one starts a new session (new labels, new placeholder numbering, consent answers forgotten).
 - `fake_key` must match the key the agent sends, or every call is refused. Without a readable file the agent gets no tools and no model calls (`no_permissions`).
 - `permissions` is `AgentPermissions` from `core/contracts/agents.py`. Folder paths are stored resolved; the gateway finds each folder by its last path part.
-- **[B] `provider`: not written yet.** Pass `provider` from `open_agent` into `write_permissions` and add `"provider": provider` to the file. Once it's there, the gateway refuses model calls to any other cloud provider (`provider_not_chosen`), as `project-plan.md` section 6 requires ("checks the destination is your chosen provider"). The local model is always allowed. Without the field, any provider is allowed. C's `/api/launch` already passes the provider to `open_agent`.
+- `provider`, `model`: the user's choice, written by `open_agent`. The gateway refuses model calls to any other cloud provider (`provider_not_chosen`) or another model there (`model_not_chosen`), as `project-plan.md` section 6 requires. The local model is always allowed.
 
 ### Folders
 
@@ -86,22 +90,18 @@ The manager mounts each allowed folder into the gateway, never into an agent, at
 | Variable | Set today | Meaning |
 |---|---|---|
 | `HEIMDALL_FAKE_KEYS` | yes | `agent:key` pairs; must match each agent's `FAKE_KEY` |
-| `GEMINI_API_KEY`, `ANTHROPIC_API_KEY` | from `.env` | Real keys. Only the gateway ever gets them |
+| `GEMINI_API_KEY`, `ANTHROPIC_API_KEY` | yes | Real keys, from the app's key store (C's `key_service`) or `.env`. Only the gateway ever gets them; it reads them at start |
 | `HEIMDALL_PROVIDER=mock` | optional, from `.env` | Scripted model, no network, for offline runs |
 | `CORE_URL` | default `http://host.docker.internal:8765` | C's back end |
-| `HEIMDALL_EVENTS_URL` | **[B] add once C has the endpoint** | Where events are posted, e.g. `http://host.docker.internal:8765/api/event` |
+| `HEIMDALL_EVENTS_URL` | yes | `http://host.docker.internal:8765/api/event`: every event goes to the dashboard |
 | `GMAIL_SOURCE` | default `fixture` | `live` is refused until the Gmail OAuth files are mounted |
 | `OLLAMA_URL` | default as above | The local model |
 
 Volumes: `gateway-state` (`/state`: the vault, drafts, outbox, consent answers; never mount it into an agent) and the fixture inbox at `/data/inbox`.
 
-### To do for B
+### Scene 4: a malicious skill
 
-1. **[B] Write `provider` into `permissions.json`** (above). One line.
-2. **[B] Local model** (scene 6, second half): add `PROVIDERS["local"] = "<an Ollama model, e.g. llama3.2:3b>"` in `agents/manager.py`. Point OpenClaw's `heimdall` provider at `http://gateway:8080/model/local` with `api: openai-completions`, and do the same for Hermes's OpenAI-style client. Ollama must run on the host with the model pulled. The gateway side is done and tested with a fake Ollama; nothing has run end to end yet.
-3. **[B] Real keys from the app:** the user will enter keys in the app (C's key store), not in `.env`. Add `GEMINI_API_KEY: ${GEMINI_API_KEY:-}` and `ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}` under the gateway's `environment:` in compose, so the manager can pass them when it starts the gateway. Recreate the gateway after a key changes; it reads them at start.
-4. **[B] Memory** (`project-plan.md` section 6: every note carries a label, and Confidential notes need consent): not built. Hermes keeps notes inside its own container, so they never pass the gateway, and the firewall can't label them. The firewall can do it if notes go through gateway tools (for example `memory_read` and `memory_write`, stored in the gateway with the session's label). Let's agree on the shape before either of us builds it.
-5. **[B, with D] Scene 4:** agents have no internet, so a skill's raw upload simply fails with no event. Every way out through the gateway is already watched by the tripwire. If the demo needs a visible "blocked" moment for raw network calls, we'd add an egress logger. Decide together.
+Decided (issue #5): no egress logger. OpenClaw runs with the `minimal` tool profile plus Heimdall's tools only, so a skill can't run `curl` or any other command. Its only ways out are the gateway's tools and model calls, and the key tripwire watches both (`key_theft_attempt`). The visible moment is the skill scan at install: the demo skill `weather-helper` is quarantined for reading a secrets file, sending data out and telling the agent to deceive. Forced in anyway, it got no tool calls from the agent in a live run. The demo script's line that "the attacker's screen receives only the fake key" doesn't match this; it needs rewording before the pitch.
 
 ## 3. Back end and app (C)
 
@@ -122,13 +122,14 @@ Always present: `kind` (`approval` or `consent`), `container_id` (the agent's na
 - The `gmail_send` fields hold the user's real personal data. Show them in the pop-up, but don't log or store them.
 - A consent answer on a model call holds for that file for the rest of the agent's run, and so does a deny, so the user isn't asked again on every model call.
 
-### To do for C
+### Consent answers
 
-1. **[C] Consent answers** (`project-plan.md` section 5: "Allow once / Always for this folder / Deny"). Today the only answers are approve and deny, and approve means "allow for this run". To add the three answers, extend the answer to `allow_once | always_folder | deny` for `kind: consent`. Tell me the shape and I'll handle each answer in the gateway (`core/proxy/consent.py`).
-2. **[C] Events endpoint** (`project-plan.md` section 4: "every decision to an audit log, which streams to the dashboard"). Add `POST /api/event`, which takes one JSON event and puts it on `/api/events` with an SSE event name such as `event: firewall`, so it doesn't open a pop-up. Then B sets `HEIMDALL_EVENTS_URL`. The gateway already posts each event in order, in the background, and never waits on your answer. This feeds the activity feed, the flow map (green or red lines) and "what was blocked".
-3. **[C] Token on `/api/response`.** Anything on the machine can answer a pop-up today. Check a token only the app window has. This is also in `project-plan.md` section 9 (localhost lock-down: session token, Origin check).
-4. **[C] Real keys:** the key store passes `GEMINI_API_KEY` / `ANTHROPIC_API_KEY` to the manager when it starts the gateway (see B's item 3). Keys go only to the gateway, never to an agent, and never into an event.
-5. **[C or D] Frontend:** add `files_write` to `frontend/src/data/tools.ts`; it's missing. Pop-ups must ignore `event: resolved` messages except to close the matching pop-up (your stream already sends them).
+For `kind: consent` on a model call, the pop-up offers three answers, and `/api/response` takes `scope` with an approve:
+- **Allow this file** (`scope: "once"`): this file, for the rest of the agent's run.
+- **Always for this folder** (`scope: "folder"`): every file in that folder, for the rest of the run.
+- **Deny**: the text is withheld for the rest of the run.
+
+Reopening the agent starts a new run and asks again.
 
 ### Events
 
@@ -142,9 +143,9 @@ Every decision is one JSON object with a `kind` field. Today they go to the gate
 | `injection_check` | `agent`, `tool`, `verdict` (`flagged`, `not_flagged`, `not_checked`), `quote` or `reason`, `model` | The AI second opinion. `not_checked` must never be shown as "clean" |
 | `model_call` | `agent`, `api_key` (always the fake key), `model`, `tools_offered` | Feed line; a line on the flow map |
 | `model_forwarded` | `agent`, `url`, `model`, `status` | The call reached the provider |
-| `model_blocked` | `agent` (missing for an unknown key), `path`, `rule_id`, `reason`, `findings` (kind and masked preview) | Red: `key_theft_attempt` is scene 4's moment; also `secret_in_request`, `provider_not_chosen`, `no_permissions` |
+| `model_blocked` | `agent` (missing for an unknown key), `path`, `rule_id`, `reason`, `findings` (kind and masked preview) | Red: `key_theft_attempt`, `secret_in_request`, `provider_not_chosen`, `model_not_chosen`, `no_permissions` |
 | `model_withheld` | `agent`, `path`, `rule_id` (`consent_denied`), `files` | Scene 6: the request went out without these files |
-| `consent` | `agent`, `file`, `provider`, `decision` | The user's consent answer |
+| `consent` | `agent`, `file`, `provider`, `decision`, `scope` | The user's consent answer |
 | `model_other`, `model_error`, `model_upstream_error`, `ask_failed` | `agent` and details | Diagnostics. `ask_failed` means a question didn't reach the user and counted as a deny |
 
 Rule ids, reasons and counts come straight from the code. Don't turn them into scores or percentages (truth rules in `CLAUDE.md`).
@@ -163,13 +164,8 @@ After any change to an agent config, the compose files, `backend/app.py` or `not
 
 | Plan item | Owner | State |
 |---|---|---|
-| Only the chosen provider | B | Gateway ready; needs `provider` in `permissions.json` |
-| Local model, no consent question | B | Gateway ready; needs the `local` provider and Ollama |
-| Real keys from the app | B, C | Gateway reads them from its environment at start |
-| Audit log to the dashboard | C, then B | Gateway ready; needs `POST /api/event` and `HEIMDALL_EVENTS_URL` |
-| Allow once / always for this folder / deny | C, then A | Approve means "this run" until then |
-| Token on `/api/response` | C | Not started |
-| Labelled memory | B and A | Not started; agree the shape first |
-| Live Gmail | A | Needs the test account's OAuth files on the demo laptop |
-| AI injection check live | A | Built; runs once an Anthropic key is in the gateway |
-| Model name checked against the user's pick | A | Not built; only the provider is checked |
+| Live Gmail | A | Issue #12. Needs the test account's OAuth files on the demo laptop |
+| AI injection check live | A | Issue #13. Built; runs once an Anthropic key is in the gateway |
+| Real Ollama on the demo laptop | B | Wired and tested against a stand-in; install Ollama and pull `llama3.2:3b` |
+| Choosing the provider in the app | Everyone (UI) | `frontend/src/data/agents.ts` still sends `gemini`; scene 6 needs a way to pick `local` |
+| Rolling back gateway notes | A and B | Notes are kept with their time; no rollback command yet |
