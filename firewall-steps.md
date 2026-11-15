@@ -27,7 +27,7 @@ Branch: `firewall/skeleton`
 1. MCP SDK: `uv add --group gateway mcp httpx` and write down the pinned version. Confirm how a tool reads request headers with `stateless_http=True` (on v1, `ctx.request_context.request.headers`).
 2. Presidio: in a scratch venv, time `AnalyzerEngine.analyze` with `en_core_web_sm` on a made-up 300-word email, after one warm-up call. Write down the number for the standup. If over 300 ms, use regex only and run Presidio just for `PERSON`.
 3. Back end reachability: start `backend/app.py` from a `main` worktree, then `docker run --rm curlimages/curl -s -X POST http://host.docker.internal:5000/raise -H "Content-Type: application/json" -d '{"container_id":"t","question":"t"}'`. If it connects, answer it from another terminal through `/response`. If it can't connect, tell C now: the back end must listen where the gateway can reach it, or dial the gateway.
-4. OpenClaw: check whether `mcp.servers.<name>` in `openclaw.json` accepts `headers`, so B can add the bearer token.
+4. OpenClaw: check whether `mcp.servers.<name>` in `openclaw.json` accepts `headers`, so B can add the bearer token. Result: yes. With the header, the gateway logged the tool call as `"agent": "openclaw"`; `${HEIMDALL_FAKE_KEY}` is filled in. B's change is in `handoff-firewall-to-agents.md`.
 
 **Tests first** (`pytest.mark.anyio`; anyio comes with mcp):
 - `tests/firewall/test_skeleton.py::test_files_read_returns_canned_text` (call the tool through the FastMCP instance)
