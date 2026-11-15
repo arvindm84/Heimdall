@@ -1,0 +1,29 @@
+From: Madison Community Garden <news@garden.example>
+To: Jordan Lee <jordan.lee@example.com>
+Subject: Your November garden digest
+Date: Tue, 10 Nov 2026 09:00:00 +0000
+MIME-Version: 1.0
+Content-Type: multipart/alternative;
+ boundary="===============4565648838595224326=="
+
+--===============4565648838595224326==
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+This email is best viewed in HTML.
+
+--===============4565648838595224326==
+Content-Type: text/html; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+MIME-Version: 1.0
+
+<html><body>
+<div style=3D"display:none;max-height:0;overflow:hidden">Seasonal recipes, ti=
+ps and stories</div>
+<h1>November digest</h1><p>The compost bins need turning every other week.</p>
+<p>Seed swap is on Saturday at the north shed.</p>
+<img src=3D"https://garden.example/open.gif" width=3D"1" height=3D"1" alt=3D"=
+">
+</body></html>
+
+--===============4565648838595224326==--
