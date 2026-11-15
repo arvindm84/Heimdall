@@ -27,7 +27,7 @@ Branch: `firewall/skeleton`
 1. MCP SDK: `uv add --group gateway mcp httpx` and write down the pinned version. Confirm how a tool reads request headers with `stateless_http=True` (on v1, `ctx.request_context.request.headers`).
 2. Presidio: in a scratch venv, time `AnalyzerEngine.analyze` with `en_core_web_sm` on a made-up 300-word email, after one warm-up call. Write down the number for the standup. If over 300 ms, use regex only and run Presidio just for `PERSON`.
 3. Back end reachability: start `backend/app.py` from a `main` worktree, then `docker run --rm curlimages/curl -s -X POST http://host.docker.internal:5000/raise -H "Content-Type: application/json" -d '{"container_id":"t","question":"t"}'`. If it connects, answer it from another terminal through `/response`. If it can't connect, tell C now: the back end must listen where the gateway can reach it, or dial the gateway.
-4. OpenClaw: check whether `mcp.servers.<name>` in `openclaw.json` accepts `headers`, so B can add the bearer token. Result: yes. With the header, the gateway logged the tool call as `"agent": "openclaw"`; `${HEIMDALL_FAKE_KEY}` is filled in. B's change is in `handoff-firewall-to-agents.md`.
+4. OpenClaw: check whether `mcp.servers.<name>` in `openclaw.json` accepts `headers`, so B can add the bearer token. Result: yes. With the header, the gateway logged the tool call as `"agent": "openclaw"`; `${HEIMDALL_FAKE_KEY}` is filled in. B's change is in `firewall-integration.md`.
 
 **Tests first** (`pytest.mark.anyio`; anyio comes with mcp):
 - `tests/firewall/test_skeleton.py::test_files_read_returns_canned_text` (call the tool through the FastMCP instance)
@@ -234,7 +234,7 @@ Branch: `firewall-consent`
 
 **Done when:** scene 6 runs: deny, the request goes out without the file text; switch the agent to the local model, the same task runs with no pop-up.
 
-**Result (Nov 15):** the first half is done. With real OpenClaw on Gemini, the agent read `taxes/return.txt`, the consent question reached C's back end with the file name and "Gemini", and after Deny the request still went to Gemini without the text. The agent answered that consent was denied and it couldn't tell the refund. The file's numbers aren't in the gateway logs. The second half (the local model) is built and tested on the gateway side with a fake Ollama. It waits on B adding a `local` provider and on Ollama being installed; see `handoff-firewall-to-agents.md`.
+**Result (Nov 15):** the first half is done. With real OpenClaw on Gemini, the agent read `taxes/return.txt`, the consent question reached C's back end with the file name and "Gemini", and after Deny the request still went to Gemini without the text. The agent answered that consent was denied and it couldn't tell the refund. The file's numbers aren't in the gateway logs. The second half (the local model) is built and tested on the gateway side with a fake Ollama. It waits on B adding a `local` provider and on Ollama being installed; see `firewall-integration.md`.
 
 **Known limits:**
 - Only tool results are checked. Confidential text the agent copies into its own messages, or rewords, is not caught (fingerprints in Step 7 help with copies only).
@@ -242,8 +242,8 @@ Branch: `firewall-consent`
 - The agent picks `/model/local` by its base URL, which B sets. Choosing local can only keep data on the machine, so this can't be used to skip consent for a cloud call.
 
 **Issues to file:**
-- C: consent answers `allow_once`, `always_folder`, `deny` on `/raise` and `/response` (until then, approve is treated as allow for this run). The shape of every question is in `handoff-firewall-to-app.md`.
-- B: a `local` provider pointing at `http://gateway:8080/model/local` (details in `handoff-firewall-to-agents.md`).
+- C: consent answers `allow_once`, `always_folder`, `deny` on `/raise` and `/response` (until then, approve is treated as allow for this run). The shape of every question is in `firewall-integration.md`.
+- B: a `local` provider pointing at `http://gateway:8080/model/local` (details in `firewall-integration.md`).
 
 ## Audit against the plans (Nov 15, after Step 6)
 
@@ -265,7 +265,7 @@ Each firewall promise in `firewall-plan.md` and `project-plan.md`, checked again
 | Fake key swapped for the real one, provider picked by the gateway | Works | `test_model_route.py`; every live run |
 | Only the chosen provider, or the local model | Works once B writes `provider` into `permissions.json` | `test_consent.py::test_only_the_chosen_provider_is_reached`; one line for B in the handoff |
 | Local model with no consent question | Gateway side works with a fake Ollama | Waits on B's `local` provider and Ollama on the demo laptop |
-| Every decision in an audit log that streams to the dashboard | Works on our side once C has the endpoint | Events go to stdout and, with `HEIMDALL_EVENTS_URL` set, are posted one by one in the background (`test_core_client.py`); the endpoint is proposed in `handoff-firewall-to-app.md` |
+| Every decision in an audit log that streams to the dashboard | Works on our side once C has the endpoint | Events go to stdout and, with `HEIMDALL_EVENTS_URL` set, are posted one by one in the background (`test_core_client.py`); the endpoint is proposed in `firewall-integration.md` |
 | Approval and consent pop-ups through the back end | Works with C's back end from main (Nov 15: `/api/raise` on port 8765) | `test_gateway_core.py`, scenes 5 and 6 live; the lost-pop-up bug is fixed; `/api/response` still has no token |
 | Memory: every note labelled, Confidential notes need consent | Not built | Hermes memory lives in its own container, so notes never pass the gateway. Step 7 work with B |
 | Check the model name against what the user picked | Not built | The model name passes through; only the provider is checked |
