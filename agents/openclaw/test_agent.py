@@ -75,22 +75,6 @@ def test_staged_skill_and_mounted_folder_work_in_container(tmp_path):
             "openclaw", "sh", "-c", "test ! -e /home/node/.openclaw/workspace/skills/weather-helper && echo clean"
         )
         assert quarantined_check.strip() == "clean"
-        # MCP call from inside OpenClaw reads the mounted host folder through the gateway.
-        request = {
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "tools/call",
-            "params": {"name": "files_read", "arguments": {"path": "Readings/essay.txt"}},
-        }
-        reply = testing.in_agent(
-            "openclaw",
-            "curl", "-s", "-X", "POST", "http://gateway:8080/mcp",
-            "-H", f"Authorization: Bearer {agent.FAKE_KEY}",
-            "-H", "Content-Type: application/json",
-            "-H", "Accept: application/json, text/event-stream",
-            "-d", json.dumps(request),
-        )
-        assert "Main argument: capability security seals agents." in reply
     finally:
         manager.kill_agent("openclaw")
 

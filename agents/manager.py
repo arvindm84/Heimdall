@@ -53,7 +53,7 @@ def gateway_folder_mounts(permission_sets: list[AgentPermissions]) -> list[dict]
     return list(mounts.values())
 
 
-def write_permissions(agent: str, permissions: AgentPermissions) -> None:
+def write_permissions(agent: str, permissions: AgentPermissions, provider: str = "gemini") -> None:
     """What the gateway reads: this agent's permissions.json, and the folder mounts for all agents."""
     others = [
         AgentPermissions(**json.loads(path.read_text(encoding="utf-8"))["permissions"])
@@ -75,6 +75,7 @@ def write_permissions(agent: str, permissions: AgentPermissions) -> None:
     ]
     # A new run_id each open tells the gateway to start a fresh session for this agent.
     content = {
+        "provider": provider,
         "run_id": secrets.token_hex(8),
         "fake_key": profile(agent).FAKE_KEY,
         "permissions": permissions.model_copy(update={"folders": resolved}).model_dump(),
@@ -91,7 +92,7 @@ def open_agent(
         raise ValueError(f"unknown provider: {provider}")
     config_path = AGENTS_DIR / agent / "config.json"
     _write_json(config_path, module.build_config(permissions, provider, model or PROVIDERS[provider]))
-    write_permissions(agent, permissions)
+    write_permissions(agent, permissions, provider)
     token = secrets.token_urlsafe(24)
     env = {
         f"HEIMDALL_{agent.upper()}_TOKEN": token,

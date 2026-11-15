@@ -29,6 +29,8 @@ def test_permissions_json_and_folder_mounts_are_written_for_the_gateway(tmp_path
         {"type": "bind", "source": str(docs.resolve()), "target": "/data/folders/docs", "read_only": True},
         {"type": "bind", "source": str(taxes.resolve()), "target": "/data/folders/taxes", "read_only": False},
     ]
+    manager.write_permissions("hermes", permissions, provider="anthropic")
+    assert json.loads((tmp_path / "agents" / "hermes" / "permissions.json").read_text())["provider"] == "anthropic"
 
 
 def test_relative_folder_is_stored_under_its_mount_name(tmp_path, monkeypatch):

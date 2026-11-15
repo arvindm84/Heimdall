@@ -16,6 +16,8 @@ services:
         required: false
     environment:
       HEIMDALL_FAKE_KEYS: openclaw:sk-fake-openclaw-01,hermes:sk-fake-hermes-01
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
     volumes:
       # Each agent's permissions.json. User folders are added by the agent manager
       # (data/gateway/compose.folders.yaml) at /data/folders/<name>.
