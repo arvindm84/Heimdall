@@ -26,7 +26,7 @@ A consent answer on a model call holds for that file for the rest of the agent's
 
 ## Events
 
-Everything else the gateway decides goes to its stdout as JSON lines (`docker compose logs gateway`), with a `kind` field: `tool_call`, `tool_denied`, `hidden_instruction`, `injection_check`, `model_call`, `model_forwarded`, `model_blocked`, `model_withheld`, `consent`. They hold counts, rule ids, file paths, URLs and masked previews, never the real values behind placeholders or keys. The one exception is `hidden_instruction`, which shows the hidden text found in an email or page (up to 500 characters) as evidence. When you have an endpoint for plain events, `core/firewall/core_client.py` `emit()` is the one place to change.
+Everything else the gateway decides goes to its stdout as JSON lines (`docker compose logs gateway`), with a `kind` field: `tool_call`, `tool_denied`, `hidden_instruction`, `injection_check`, `model_call`, `model_forwarded`, `model_blocked`, `model_withheld`, `consent`. They hold counts, rule ids, file paths, URLs and masked previews, never the real values behind placeholders or keys. The one exception is `hidden_instruction`, which shows the hidden text found in an email or page (up to 500 characters) as evidence. The dashboard needs these for the activity feed, the flow map and scene 3's red flag. The gateway is ready: with `HEIMDALL_EVENTS_URL` set it posts each event as one JSON object (the line above) to that URL, in order, without waiting on the answer. Proposed: `POST /event` on your back end, which puts the event on the `/events` stream with a field telling the dashboard it is an event, not a question.
 
 ## Found while testing (please look)
 

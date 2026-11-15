@@ -80,7 +80,8 @@ Agents point their provider base URL at `http://gateway:8080/model`. For each re
 3. Fake key anywhere except the auth header: block, emit `key_theft_attempt`.
 4. Scan the body: exact match against the real keys the gateway holds, provider key formats, `.env`-shaped blocks. Block on a hit.
 5. Confidential content going to a cloud provider: find the tool-result blocks whose text the gateway itself returned from Confidential folders (markers, then exact match on normalized text; fingerprints later). Ask for consent. On deny, replace those blocks with a short "withheld" note and forward the rest. Local model: skip this step.
-6. Pick the upstream from the API the agent speaks. B's agent manager sets that API from the provider the user chose. OpenAI-style `chat/completions` goes to Gemini's OpenAI-compatible endpoint, with Google's thought-signature placeholder on replayed tool calls. Anthropic-style `messages` goes to Anthropic. Set the real key and relay the response as a stream so chat replies still stream. No real key for that provider: 502. Provider errors are passed on, and the first 500 characters are logged.
+6. If `permissions.json` names the provider the user chose, refuse any other cloud provider (`provider_not_chosen`); the local model is always allowed.
+7. Pick the upstream from the API the agent speaks. B's agent manager sets that API from the provider the user chose. OpenAI-style `chat/completions` goes to Gemini's OpenAI-compatible endpoint, with Google's thought-signature placeholder on replayed tool calls. Anthropic-style `messages` goes to Anthropic. Set the real key and relay the response as a stream so chat replies still stream. No real key for that provider: 502. Provider errors are passed on, and the first 500 characters are logged.
 
 The handler is `async`, so a consent wait does not freeze other traffic. `HEIMDALL_PROVIDER=mock` answers in both API styles with a scripted reply and no network, for tests and offline demos. The agent's model name passes through for now; Step 3 checks it against what the user picked. The local model is any call under `/model/local/`, which goes to Ollama on the host (`OLLAMA_URL`) and skips consent.
 
@@ -97,9 +98,9 @@ Truth rule: events carry the rule id, the removed text and counts. No risk score
 
 | Path | What it holds |
 |---|---|
-| `core/firewall/config.py` | Loads `/config/gateway.json` (folder labels, agents' fake keys and providers) and each agent's `AgentPermissions` (imported from `core/contracts/agents.py`) |
+| `core/firewall/config.py`, `permissions.py` | Settings from the environment (fake keys, real keys, folders, Gmail source, Ollama URL); each agent's `permissions.json` (`AgentPermissions` from `core/contracts/agents.py`, `run_id`, chosen provider), read on every call |
 | `core/firewall/labels.py` | Label order, join, folder label lookup |
-| `core/firewall/session.py` | Per-agent state: labels, what Confidential text was served, vault handle |
+| `core/firewall/session.py`, `confidential.py` | Per-agent state (labels, untrusted flag, delimiter); what Confidential text was served and the consent answers (SQLite) |
 | `core/firewall/policy.py` | Rule table and `decide()` |
 | `core/firewall/guard.py` | The pipeline wrapper above |
 | `core/firewall/vault.py`, `pii.py` | Placeholder store (SQLite at `/state/gateway.db`); regex recognizers first (email, phone, SSN, card with Luhn), spaCy `en_core_web_sm` for names |
@@ -107,7 +108,7 @@ Truth rule: events carry the rule id, the removed text and counts. No risk score
 | `core/firewall/secrets.py` | Key formats, real-key match, fake-key tripwire, `.env` shape |
 | `core/firewall/core_client.py` | `ask()` and `emit()`; today posts to `/raise` |
 | `core/firewall/tools/files.py`, `gmail.py`, `web.py` | The tools. `files` resolves real paths and rejects anything outside the mounted folder |
-| `core/proxy/model_route.py`, `model_request.py` | The `/model/{path}` route and upstream relay; parsing and editing Anthropic and OpenAI request bodies |
+| `core/proxy/model_route.py`, `consent.py`, `mock_model.py` | The `/model/{path}` route and upstream relay; finding and withholding Confidential tool results in Anthropic and OpenAI request bodies; the offline mock model |
 | `core/gateway.py` | Starts the MCP server on port 8080, registers tools and the model route |
 | `images/gateway/Dockerfile` | Gateway image, built from the repo root with the `gateway` dependency group in `pyproject.toml` |
 | `tests/firewall/`, `tests/seams/` | Unit tests and the two seam tests A co-owns |

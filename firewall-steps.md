@@ -246,6 +246,33 @@ Branch: `firewall-consent`
 - C: consent answers `allow_once`, `always_folder`, `deny` on `/raise` and `/response` (until then, approve is treated as allow for this run). The shape of every question is in `handoff-firewall-to-app.md`.
 - B: a `local` provider pointing at `http://gateway:8080/model/local` (details in `handoff-firewall-to-agents.md`).
 
+## Audit against the plans (Nov 15, after Step 6)
+
+Each firewall promise in `firewall-plan.md` and `project-plan.md`, checked against the code and a live run. "Live" means real containers with Gemini and C's back end on the host.
+
+| Promise | Status | Evidence |
+|---|---|---|
+| Every tool call goes through one guard; unknown agent or tool is denied | Works | `test_guard.py`, `test_skeleton.py` |
+| Files: folder permissions, read-only folders, no escaping a folder | Works | `test_files_tool.py`, `test_agent_gateway.py` (live) |
+| Placeholders for personal data, same value same placeholder | Works for email, phone with separators, SSN, card; names partly | `test_pii.py`, `test_vault.py`; live Hermes summary showed only placeholders for addresses and phones, but some sender names came through (known limit, Step 2) |
+| Hidden text stripped and flagged, scene 3 offline | Works | `test_sanitize.py`, `test_injection.py`; live on OpenClaw and Hermes |
+| The AI check (Haiku) | Built, not run live | Needs `ANTHROPIC_API_KEY`, which the user adds from the front end later; until then events say `not_checked` |
+| Untrusted content: writes and fetches ask (Rule of Two) | Works | `test_policy.py`, `test_web_fetch.py` |
+| `web_fetch` cannot reach the host, the gateway or cloud metadata | Works | `test_web_fetch.py`; live from the container |
+| Send waits for approval; placeholders filled only after it, only from this session | Works | `test_gmail_send.py`; live scene 5 |
+| Consent before Confidential text goes to a cloud model; deny strips it | Works | `test_consent.py`; live scene 6 on OpenClaw and Hermes |
+| Consent on sends and fetches after a Confidential read | Works | `test_consent.py` |
+| Fake key and secrets blocked in model calls and tool arguments | Works | `test_model_tripwire.py`, `test_guard.py`, `test_secrets.py`; live from the container |
+| Fake key swapped for the real one, provider picked by the gateway | Works | `test_model_route.py`; every live run |
+| Only the chosen provider, or the local model | Works once B writes `provider` into `permissions.json` | `test_consent.py::test_only_the_chosen_provider_is_reached`; one line for B in the handoff |
+| Local model with no consent question | Gateway side works with a fake Ollama | Waits on B's `local` provider and Ollama on the demo laptop |
+| Every decision in an audit log that streams to the dashboard | Works on our side once C has the endpoint | Events go to stdout and, with `HEIMDALL_EVENTS_URL` set, are posted one by one in the background (`test_core_client.py`); the endpoint is proposed in `handoff-firewall-to-app.md` |
+| Approval and consent pop-ups through the back end | Works with C's current `/raise` | `test_gateway_core.py`; two back-end bugs written up for C |
+| Memory: every note labelled, Confidential notes need consent | Not built | Hermes memory lives in its own container, so notes never pass the gateway. Step 7 work with B |
+| Check the model name against what the user picked | Not built | The model name passes through; only the provider is checked |
+| Live Gmail read and send | Not built | Needs the test account's OAuth files on the demo laptop |
+| Scene 4: a visible "blocked" moment for raw network calls | Not built (B and D) | Agents have no internet, so a raw upload just fails; the tripwire covers every route through the gateway |
+
 ## Step 7: extras, only if steps 0 to 6 are merged and the demo runs
 
 - Winnowing fingerprints (k = 30 characters, window 20) for Confidential text that has been edited.

@@ -36,6 +36,14 @@ What changed for you with the real gateway:
 - New tools `gmail_draft` and `gmail_send`. List them in `AgentPermissions.tools` like any other tool; your config builders already pass them through (tested live with OpenClaw).
 - Text that `files_read` returns from a Confidential folder now comes wrapped in `<<confidential:id>> ... <</confidential:id>>`. The agent should keep it as is. On calls to a cloud model, the user is asked once per file, and a denied file's text is replaced with `[withheld by Heimdall: Confidential content, consent denied]`.
 
+## Waiting on B: the chosen provider (one line)
+
+The gateway now refuses model calls to a cloud provider the user didn't choose (`provider_not_chosen`), but only when `permissions.json` says which one. In `agents/manager.py`, pass `provider` into `write_permissions` and add it to the file: `"provider": provider` next to `"run_id"`. The values are the keys of `PROVIDERS` (`gemini`, `anthropic`, later `local`). Calls to the local model are always allowed. Without the field nothing changes.
+
+## Later, when C has an events endpoint
+
+Set `HEIMDALL_EVENTS_URL` in `agents/gateway/compose.yaml` to C's endpoint (for example `http://host.docker.internal:5000/event`). The gateway then posts every event there as well as printing it.
+
 ## Waiting on B: the local model (scene 6, second half)
 
 The gateway side is done and tested with a fake Ollama: any model call under `/model/local/` goes to Ollama on the host (`OLLAMA_URL`, default `http://host.docker.internal:11434/v1/chat/completions`), is still scanned for keys, and never asks for consent. To use it:
