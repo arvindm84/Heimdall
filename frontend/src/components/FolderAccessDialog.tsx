@@ -36,9 +36,9 @@ type Props = {
 
 // The popup before an agent's first start: a folder tree with one label per folder.
 // Only folders the user clicks go into `labels`, and only those are shared with the agent
-// (backend/services/folder_service.py, granted_folders). Any other folder shows its parent's
-// label (dimmed), or Confidential at the top level, so changing a parent changes every
-// subfolder the user hasn't set.
+// (backend/services/folder_service.py, granted_folders). A folder inside a marked folder is
+// shared under its parent's label and shows it dimmed. A folder with no marked parent isn't
+// shared at all, so its boxes are empty: a tick always means the agent can see it.
 export default function FolderAccessDialog({ agentName, initial, saveText, onSave, onCancel }: Props) {
   const [labels, setLabels] = useState<FolderLabels>(initial);
   const [home, setHome] = useState<string | null>(null);
@@ -94,8 +94,9 @@ export default function FolderAccessDialog({ agentName, initial, saveText, onSav
     }
   };
 
-  // One row per folder, then its subfolders if open. `inherited`: the parent's label.
-  const rows = (parent: string, depth: number, inherited: Label): ReactNode =>
+  // One row per folder, then its subfolders if open. `inherited`: the nearest marked parent's
+  // label, or null when no parent is marked (not shared, so no tick).
+  const rows = (parent: string, depth: number, inherited: Label | null): ReactNode =>
     children[parent]?.map((folder) => {
       const chosen = labels[folder.path];
       const label = chosen ?? inherited;
@@ -162,9 +163,9 @@ export default function FolderAccessDialog({ agentName, initial, saveText, onSav
         <div className="px-6 pt-5 pb-4">
           <h2 className="text-xl font-bold">Folder access for {agentName}</h2>
           <p className="mt-1 max-w-[60ch] text-sm text-lichen">
-            Only folders you mark are shared with {agentName}. Everything else starts as Confidential and stays hidden
-            from it. Subfolders follow their parent unless you change them, so to share one subfolder only, mark just
-            that subfolder. Click a mark again to remove it. Change this later from Folder access; it applies the next time the agent starts.
+            Only folders you tick are shared with {agentName}. Folders with empty boxes stay hidden from it. Subfolders
+            follow their parent (faint tick) unless you change them, so to share one subfolder only, tick just that
+            subfolder. Click a mark again to remove it. Change this later from Folder access; it applies the next time the agent starts.
           </p>
         </div>
 
@@ -180,7 +181,7 @@ export default function FolderAccessDialog({ agentName, initial, saveText, onSav
         </div>
 
         <div className="min-h-40 flex-1 overflow-y-auto px-6">
-          {home ? rows(home, 0, "confidential") : !saveError && <p className="py-4 text-sm text-lichen">Loading folders…</p>}
+          {home ? rows(home, 0, null) : !saveError && <p className="py-4 text-sm text-lichen">Loading folders…</p>}
         </div>
 
         <div className="flex items-center justify-end gap-2 border-t border-rule px-6 py-4">
