@@ -59,6 +59,12 @@ def write_permissions(agent: str, permissions: AgentPermissions) -> None:
         for path in AGENTS_DIR.glob("*/permissions.json")
         if path.parent.name != agent
     ]
+    # Another agent's folder that was deleted since can't be mounted; drop it instead of
+    # refusing to open this agent. This agent's own folders must still exist.
+    others = [
+        other.model_copy(update={"folders": [f for f in other.folders if Path(f.path).expanduser().is_dir()]})
+        for other in others
+    ]
     mounts = gateway_folder_mounts([*others, permissions])
     # Store each folder's resolved path: its last part is the name it is mounted under,
     # which is how the gateway finds the folder ("." or "~/docs" would not match).

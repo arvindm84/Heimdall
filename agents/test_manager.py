@@ -46,6 +46,18 @@ def test_relative_folder_is_stored_under_its_mount_name(tmp_path, monkeypatch):
     assert mount["target"] == f"/data/folders/{stored.name}"
 
 
+def test_another_agents_deleted_folder_does_not_block_opening(tmp_path, monkeypatch):
+    # A folder granted to openclaw earlier was deleted since; hermes must still open.
+    monkeypatch.setattr(manager, "AGENTS_DIR", tmp_path / "agents")
+    monkeypatch.setattr(manager, "FOLDER_MOUNTS", tmp_path / "gateway" / "compose.folders.yaml")
+    gone = tmp_path / "gone"
+    gone.mkdir()
+    manager.write_permissions("openclaw", AgentPermissions(folders=[FolderAccess(path=str(gone))]))
+    gone.rmdir()
+    manager.write_permissions("hermes", AgentPermissions(tools=["files_read"]))
+    assert json.loads(manager.FOLDER_MOUNTS.read_text())["services"]["gateway"]["volumes"] == []
+
+
 def test_folders_must_exist_and_have_different_names(tmp_path):
     (tmp_path / "a" / "docs").mkdir(parents=True)
     (tmp_path / "b" / "docs").mkdir(parents=True)
