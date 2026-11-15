@@ -194,17 +194,28 @@ Branch: `firewall-hidden-text`
 
 ## Step 5: draft and send with approval (about 1 h)
 
-Branch: `firewall/approved-send`
+Branch: `firewall-approved-send`
 
 **Tests first:**
-- `test_gmail_send.py`: send always asks; the pop-up text shows the real recipient and body after filling in placeholders; approve sends exactly once; deny and timeout send nothing; a placeholder from another session is not filled and the send is denied; `gmail_draft` keeps placeholders as they are.
-- Seam test, with C: `tests/seams/test_gateway_core.py::test_send_waits_for_approval` (raise, answer through `/response`, tool finishes) and `test_no_answer_means_deny`.
+- `test_gmail_send.py`: send always asks; the pop-up text shows the real recipient and body after filling in placeholders; approve sends exactly once; deny and a failed ask send nothing; a placeholder from another session, or one that doesn't exist, is refused before asking; the recipient must be one address or one `{{EMAIL_n}}`; a subject with a line break (header injection) is refused; a key in the mail is refused before asking; the agent gets back its own placeholders, never the real values; events never hold the real values; `gmail_draft` keeps placeholders as they are and asks nothing.
+- Seam test, with C: `tests/seams/test_gateway_core.py` runs C's real Flask back end in a thread: `test_send_waits_for_approval` (raise, answer through `/response`, tool finishes), `test_no_answer_means_deny` and `test_dead_back_end_means_deny`.
+- Seam test `tests/seams/test_scene5_send.py`: scene 5 with real containers and C's back end on port 5000.
 
 **Build:**
-1. `tools/gmail.py`: `gmail_draft(to, subject, body)`, `gmail_send(to, subject, body)`. Fixture mode writes sent mail to `/state/outbox/` so the demo can show it.
-2. In the guard, `gmail_send` fills placeholders in memory first, asks with the filled-in text, and sends only on approve. The filled-in values never go back to the agent.
+1. `tools/gmail.py`: `check_message` (fixture mode only for now, one recipient, one-line subject) and `save`, which writes an `.eml`. Drafts go to `/state/drafts/`, sent mail in fixture mode to `/state/outbox/`, both in the `gateway-state` volume.
+2. Policy: `gmail_draft_allowed`; `send_needs_approval` asks on every send.
+3. Guard: a `fill` argument. After the secret scan, `gmail_send` fills placeholders from this session's vault in memory, refuses `placeholder_not_in_session` if any is unknown, asks with the filled-in email (it goes to the user's own back end only), and hands the filled fields to the tool only on approve. The agent gets "Sent the email to {{EMAIL_1}}." The `tool_call` event counts how many placeholders were filled.
 
 **Done when:** scene 5 runs: the agent drafts a reply, the pop-up shows the real address, Approve sends once.
+
+**Result (Nov 15):** done. The full suite passes: 315 tests, plus 1 symlink test skipped on Windows. With the real model, OpenClaw on Gemini read Priya's email, called `gmail_send` with `{{EMAIL_1}}`, and the pop-up through C's back end read "To: priya.raman@example.com". After Approve, exactly one email landed in `/state/outbox/`. The real address never appears in the gateway logs.
+
+**Not built yet:** live Gmail sending (same OAuth setup as live reading).
+
+**Found on the way (C's back end):** each `/events` connection is a thread that takes the next question off one shared queue. If the dashboard reconnects (a page reload), the old connection's thread still takes the next question and loses it, so that pop-up never shows and the agent waits 120 s for a deny. The seam tests keep one `/events` connection open, like the real dashboard should.
+
+**Issues to file:**
+- C: questions lost when the dashboard reconnects to `/events` (above). A fix: keep unanswered questions in `_waiting` with their details and send all of them to every new `/events` connection.
 
 ## Step 6: consent on model calls (about 1 h)
 
