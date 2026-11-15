@@ -10,6 +10,8 @@ FAKE_KEY = "sk-fake-hermes-01"
 
 
 def build_config(permissions: AgentPermissions, provider: str, model: str) -> dict:
+    if permissions.skills:
+        raise ValueError("hermes does not support skills yet")
     config = json.loads((Path(__file__).parent / "config.json").read_text(encoding="utf-8"))
     config["model"] = {"default": model, "provider": provider}
     config["mcp_servers"]["heimdall"]["tools"]["include"] = list(permissions.tools)

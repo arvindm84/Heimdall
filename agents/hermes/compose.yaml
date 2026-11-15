@@ -3,6 +3,10 @@ name: heimdall
 include:
   - ../gateway/compose.yaml
 
+volumes:
+  # Survives kill and recreate: live memory plus snapshots. Only `docker compose down -v` removes it.
+  hermes-memory: {}
+
 services:
   hermes:
     build: .
@@ -20,6 +24,7 @@ services:
     volumes:
       - ${HEIMDALL_HERMES_CONFIG:-./config.json}:/config/config.json:ro
       - gateway-ca:/certs:ro
+      - hermes-memory:/heimdall/memory
 
   hermes-ui:
     image: alpine/socat:1.8.0.3

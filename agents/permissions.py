@@ -12,6 +12,7 @@ class FolderAccess(BaseModel):
 class AgentPermissions(BaseModel):
     folders: list[FolderAccess] = []
     tools: list[str] = []
+    skills: list[str] = []
     memory: bool = False
     delegation: bool = False
 

@@ -11,6 +11,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+from agents import skills
 from agents.permissions import AgentPermissions, OpenedAgent
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -43,6 +44,7 @@ def build_gateway_config(current: dict, agent: str, permissions: AgentPermission
         "fake_key": profile(agent).FAKE_KEY,
         "folders": [folder.path for folder in permissions.folders],
         "tools": list(permissions.tools),
+        "skills": list(permissions.skills),
         "provider": provider,
     }
     return {
@@ -68,6 +70,8 @@ def open_agent(
         f"HEIMDALL_{agent.upper()}_TOKEN": token,
         f"HEIMDALL_{agent.upper()}_CONFIG": str(config_path),
     }
+    if agent == "openclaw":
+        env["HEIMDALL_OPENCLAW_SKILLS"] = str(skills.stage(agent, permissions.skills))
     compose("up", "-d", "--build", "gateway", env=env)
     compose("up", "-d", "--build", "--no-deps", "--force-recreate", agent, f"{agent}-ui", env=env)
     opened = OpenedAgent(
@@ -86,6 +90,13 @@ def kill_agent(agent: str) -> None:
     profile(agent)
     compose("kill", agent, f"{agent}-ui")
     compose("rm", "-f", agent, f"{agent}-ui")
+
+
+def memory(agent: str, *args: str) -> str:
+    """Hermes memory snapshots: memory(agent, "list" | "snapshot" | "rollback", [id])."""
+    if agent != "hermes":
+        raise ValueError(f"{agent} has no memory")
+    return compose("exec", "-T", agent, "heimdall-memory", *args)
 
 
 def chat_status(chat_url: str, token: str) -> int | None:

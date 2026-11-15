@@ -3,6 +3,10 @@ set -e
 until [ -f /certs/mitmproxy-ca-cert.pem ]; do sleep 1; done
 mkdir -p ~/.openclaw/workspace
 cp /opt/heimdall/workspace/* ~/.openclaw/workspace/
+# Only the skills Heimdall staged for this launch (scanned, and allowed in permissions).
+rm -rf ~/.openclaw/workspace/skills
+mkdir -p ~/.openclaw/workspace/skills
+cp -r /opt/heimdall/skills/. ~/.openclaw/workspace/skills/ 2>/dev/null || true
 cp /config/config.json ~/.openclaw/openclaw.json
 chmod 600 ~/.openclaw/openclaw.json
 node /app/openclaw.mjs gateway &
