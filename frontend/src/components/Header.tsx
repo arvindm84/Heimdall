@@ -1,3 +1,5 @@
+import heimdallMark from "../assets/heimdall.png";
+
 export type Page = "agents" | "activity" | "flow";
 
 const TABS: { id: Page; label: string }[] = [
@@ -17,8 +19,13 @@ type Props = {
 export default function Header({ page, onNavigate, waitingCount, runningCount, onStopAll }: Props) {
   return (
     <header className="border-b border-rule">
-      <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-10 gap-y-3 px-8 py-4">
-        <span className="text-lg font-bold">Heimdall</span>
+      {/* Full window width (not the page's centred column): the logo sits at the left edge, like an app. */}
+      <div className="flex flex-wrap items-center gap-x-10 gap-y-3 px-8 py-4">
+        <span className="flex items-center gap-3">
+          {/* Pixel art: head and shoulders, background cut out, saved at 5x its display size so it stays sharp. */}
+          <img src={heimdallMark} alt="" className="h-[42px] w-auto" />
+          <span className="text-4xl font-bold tracking-tight">Heimdall</span>
+        </span>
 
         <nav className="flex gap-1">
           {TABS.map(({ id, label }) => {
