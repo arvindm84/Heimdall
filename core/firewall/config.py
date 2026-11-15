@@ -22,6 +22,8 @@ class GatewaySettings:
     # Where B's agent manager mounts permissions.json files and the user's folders.
     agents_dir: Path = Path("/config/agents")
     folders_dir: Path = Path("/data/folders")
+    # The gateway's own state (the placeholder vault). Holds real personal data; never mounted into agents.
+    state_dir: Path = Path("/state")
 
 
 def parse_fake_keys(text: str) -> dict[str, str]:
@@ -46,4 +48,5 @@ def load_settings(env: dict[str, str] | None = None) -> GatewaySettings:
         anthropic_key=env.get("ANTHROPIC_API_KEY", ""),
         agents_dir=Path(env.get("HEIMDALL_AGENTS_DIR", "/config/agents")),
         folders_dir=Path(env.get("HEIMDALL_FOLDERS_DIR", "/data/folders")),
+        state_dir=Path(env.get("HEIMDALL_STATE_DIR", "/state")),
     )

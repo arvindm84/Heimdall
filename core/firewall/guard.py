@@ -2,7 +2,8 @@
 
 Order: identify the agent from its key -> load its permissions -> its session ->
 check the path -> policy.decide -> ask the user if the rule says so -> run the
-tool -> raise the session label -> emit exactly one tool_call event.
+tool -> swap personal data for placeholders -> raise the session label -> emit
+exactly one tool_call event.
 
 Any denial raises PermissionError with the rule and reason, which FastMCP returns
 to the agent as an error result, so the agent can tell the user why.
@@ -20,15 +21,21 @@ from core.firewall.permissions import AgentRun, NoPermissions
 from core.firewall.session import Session, Sessions
 from core.firewall.tools import files
 from core.firewall.tools.files import Denied, Target
+from core.firewall.vault import Vault
+
+# Tools whose results carry the user's data, so personal data is swapped for placeholders.
+# gmail_read and web_fetch join in Step 4.
+REDACTED_TOOLS = {"files_read"}
 
 # The tool's own work, run only after the call is allowed: (run, target or None) -> text for the agent.
 Work = Callable[[AgentRun, Target | None], str]
 
 
 class Guard:
-    def __init__(self, settings: GatewaySettings, sessions: Sessions):
+    def __init__(self, settings: GatewaySettings, sessions: Sessions, vault: Vault):
         self.settings = settings
         self.sessions = sessions
+        self.vault = vault
 
     def identify(self, ctx: Context, tool: str) -> tuple[str, str]:
         """(agent, key) from the bearer key on this MCP call.
@@ -77,10 +84,13 @@ class Guard:
             result = work(run, target)
         except Denied as denied:
             self.refuse(agent, tool, path, session, "deny", denied.rule_id, denied.reason)
+        counts: dict[str, int] = {}
+        if tool in REDACTED_TOOLS:
+            result, counts = self.vault.redact(result, session.id)
         # Only reading content raises the label: the session now holds data at that level.
         if tool == "files_read" and target is not None:
             session.raise_label(from_contract(target.access.label))
-        self.record(agent, tool, path, session, outcome, decision.rule_id, decision.reason)
+        self.record(agent, tool, path, session, outcome, decision.rule_id, decision.reason, counts)
         return result
 
     async def ask_user(self, agent: str, tool: str, path: str | None, decision: policy.Decision) -> bool:
@@ -93,9 +103,21 @@ class Guard:
         return answer == "approve"
 
     def record(
-        self, agent: str, tool: str, path: str | None, session: Session | None, decision: str, rule_id: str, reason: str
+        self,
+        agent: str,
+        tool: str,
+        path: str | None,
+        session: Session | None,
+        decision: str,
+        rule_id: str,
+        reason: str,
+        placeholders: dict[str, int] | None = None,
     ) -> None:
-        """The one event for this call. `label` is the session's label after the call."""
+        """The one event for this call.
+
+        `label` is the session's label after the call. `placeholders` counts what the
+        vault replaced, by kind (counts only: the values never go into events).
+        """
         label = str(session.label) if session else "public"
         core_client.emit(
             "tool_call",
@@ -106,6 +128,7 @@ class Guard:
             rule_id=rule_id,
             reason=reason,
             label=label,
+            placeholders=placeholders or {},
         )
 
     def refuse(

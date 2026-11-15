@@ -51,7 +51,7 @@ def make_world(tmp_path: Path, tools=("files_list", "files_read", "files_write")
     folders = tmp_path / "folders"
     (folders / "docs" / "sub").mkdir(parents=True)
     (folders / "taxes").mkdir(parents=True)
-    (folders / "docs" / "notes.txt").write_text("Made-up notes. Call Sam on Tuesday.", encoding="utf-8")
+    (folders / "docs" / "notes.txt").write_text("Made-up notes. The garden opens at nine.", encoding="utf-8")
     (folders / "docs" / "sub" / "plan.txt").write_text("Made-up plan.", encoding="utf-8")
     (folders / "taxes" / "summary.txt").write_text("Made-up tax summary.", encoding="utf-8")
     permissions = AgentPermissions(
@@ -63,7 +63,11 @@ def make_world(tmp_path: Path, tools=("files_list", "files_read", "files_write")
     )
     write_permissions(tmp_path / "agents", permissions)
     return GatewaySettings(
-        fake_keys={FAKE_KEY: "openclaw"}, mock=True, agents_dir=tmp_path / "agents", folders_dir=folders
+        fake_keys={FAKE_KEY: "openclaw"},
+        mock=True,
+        agents_dir=tmp_path / "agents",
+        folders_dir=folders,
+        state_dir=tmp_path / "state",
     )
 
 

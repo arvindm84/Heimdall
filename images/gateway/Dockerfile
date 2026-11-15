@@ -18,7 +18,7 @@ RUN uv sync --frozen --no-default-groups --group gateway --no-install-project
 COPY core ./core
 
 # The gateway holds the real keys; don't run it as root.
-RUN useradd --system --no-create-home gateway
+RUN useradd --system --no-create-home gateway  && mkdir /state && chown gateway /state
 USER gateway
 EXPOSE 8080
 CMD ["python", "-m", "core.gateway"]

@@ -22,6 +22,11 @@ class Session:
     # Random per session, used in Step 4 to wrap untrusted text (Spotlighting).
     delimiter: str = field(default_factory=lambda: secrets.token_hex(8))
 
+    @property
+    def id(self) -> str:
+        """One id per agent run; the vault numbers placeholders per id."""
+        return f"{self.agent}:{self.run_id}"
+
     def raise_label(self, label: Label) -> None:
         self.label = join(self.label, label)
 

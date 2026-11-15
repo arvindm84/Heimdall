@@ -15,6 +15,7 @@ from core.firewall.config import GatewaySettings, load_settings
 from core.firewall.guard import Guard
 from core.firewall.session import Sessions
 from core.firewall.tools import files
+from core.firewall.vault import Vault
 from core.proxy.model_route import make_model_route
 
 
@@ -38,7 +39,7 @@ def build_gateway(
         # Agents reach us as http://gateway:8080 on the internal network, which the default Host check rejects.
         transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False),
     )
-    guard = Guard(settings, sessions or Sessions())
+    guard = Guard(settings, sessions or Sessions(), Vault(settings.state_dir / "gateway.db"))
 
     # Tool names use underscores: the Claude API rejects dots in tool names.
     # Tools are async so an approval wait does not block other calls.
@@ -58,7 +59,8 @@ def build_gateway(
 
     @mcp.tool(structured_output=False)
     async def files_read(path: str, ctx: Context) -> str:
-        """Read a text or PDF file. `path` is "<folder>/<path inside it>", as files_list shows it."""
+        """Read a text or PDF file. `path` is "<folder>/<path inside it>", as files_list shows it.
+        Personal data comes back as placeholders like {{EMAIL_1}}: use them as they are."""
         return await guard.run(ctx, "files_read", path, lambda run, target: files.read_file(target))
 
     @mcp.tool(structured_output=False)

@@ -28,7 +28,7 @@ def denied_rule(world, path) -> str:
 
 
 def test_reads_a_text_file(world):
-    assert "Call Sam" in files.read_file(resolve(world, "docs/notes.txt"))
+    assert "garden opens" in files.read_file(resolve(world, "docs/notes.txt"))
 
 
 def test_backslashes_work_too(world):

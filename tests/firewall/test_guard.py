@@ -42,7 +42,7 @@ def setup(tmp_path):
 
 async def test_allowed_read_returns_the_file_and_one_event(setup, events):
     _, gateway, _ = setup
-    assert "Call Sam" in await call(gateway, "files_read", {"path": "docs/notes.txt"})
+    assert "garden opens" in await call(gateway, "files_read", {"path": "docs/notes.txt"})
     assert tool_calls(events) == [
         {
             "kind": "tool_call",
@@ -53,8 +53,40 @@ async def test_allowed_read_returns_the_file_and_one_event(setup, events):
             "rule_id": "files_read_allowed",
             "reason": "folder docs is allowed",
             "label": "private",
+            "placeholders": {},
         }
     ]
+
+
+CONTACTS = "Made-up contacts.\nPriya Raman: priya@example.com, (608) 555-0142\nMarcus: marcus@example.com\n"
+
+
+async def test_reading_personal_data_returns_placeholders_and_counts_them(setup, events):
+    settings, gateway, _ = setup
+    (settings.folders_dir / "docs" / "contacts.txt").write_text(CONTACTS, encoding="utf-8")
+    text = await call(gateway, "files_read", {"path": "docs/contacts.txt"})
+    assert "priya@example.com" not in text and "555-0142" not in text and "Priya Raman" not in text
+    assert "{{EMAIL_1}}" in text and "{{EMAIL_2}}" in text and "{{PHONE_1}}" in text and "{{PERSON_1}}" in text
+    counts = tool_calls(events)[0]["placeholders"]
+    assert counts["EMAIL"] == 2 and counts["PHONE"] == 1 and counts["PERSON"] >= 1
+
+
+async def test_placeholders_stay_the_same_across_reads(setup, events):
+    settings, gateway, _ = setup
+    (settings.folders_dir / "docs" / "contacts.txt").write_text(CONTACTS, encoding="utf-8")
+    first = await call(gateway, "files_read", {"path": "docs/contacts.txt"})
+    second = await call(gateway, "files_read", {"path": "docs/contacts.txt"})
+    assert first == second
+
+
+async def test_new_run_numbers_placeholders_afresh(setup, events):
+    settings, gateway, _ = setup
+    (settings.folders_dir / "docs" / "a.txt").write_text("ana@example.com", encoding="utf-8")
+    (settings.folders_dir / "docs" / "b.txt").write_text("ben@example.com", encoding="utf-8")
+    assert await call(gateway, "files_read", {"path": "docs/a.txt"}) == "{{EMAIL_1}}"
+    stored = json.loads((settings.agents_dir / "openclaw" / "permissions.json").read_text(encoding="utf-8"))
+    write_permissions(settings.agents_dir, AgentPermissions.model_validate(stored["permissions"]), run_id="run-2")
+    assert await call(gateway, "files_read", {"path": "docs/b.txt"}) == "{{EMAIL_1}}"
 
 
 async def test_denied_read_tells_the_agent_why_and_emits_one_event(setup, events):
